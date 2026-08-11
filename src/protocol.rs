@@ -13,6 +13,11 @@ pub const MAX_NETWORK_MESSAGE_HISTORY: usize = 10_000;
 pub const MAX_NETWORK_INBOX_MESSAGES: usize = 10_000;
 pub const MAX_PEER_ADDRESS_LENGTH: usize = 256;
 
+// TCP üzerinden tek bir mesaj en fazla 8 MiB olabilir.
+// Block sayısı sınırından bağımsız ek DoS korumasıdır.
+pub const MAX_NETWORK_MESSAGE_BYTES: usize =
+    8 * 1024 * 1024;
+
 // Blockchain senkronizasyonu tek mesajda sınırsız büyümez.
 // Zincir 256 blokluk parçalar halinde aktarılır.
 pub const MAX_SYNC_BLOCKS_PER_MESSAGE: usize = 256;
@@ -28,7 +33,8 @@ pub const SIGNATURE_HEX_LENGTH: usize = 128;
 
 pub const SYSTEM_ADDRESS: &str = "SYSTEM";
 pub const SYSTEM_PUBLIC_KEY: &str = "SYSTEM";
-pub const SYSTEM_REWARD_SIGNATURE: &str = "SYSTEM_REWARD";
+pub const SYSTEM_REWARD_SIGNATURE: &str =
+    "SYSTEM_REWARD";
 
 pub const GENESIS_PREVIOUS_HASH: &str = "0";
 pub const GENESIS_VALIDATOR: &str = "GENESIS";

@@ -1,6 +1,14 @@
+pub mod tcp;
+
+use serde::{
+    Deserialize,
+    Serialize,
+};
+
 use crate::core::{Block, Transaction};
 use crate::protocol::{
     MAX_NETWORK_INBOX_MESSAGES,
+    MAX_NETWORK_MESSAGE_BYTES,
     MAX_NETWORK_MESSAGE_HISTORY,
     MAX_NETWORK_PEERS,
     MAX_PEER_ADDRESS_LENGTH,
@@ -8,7 +16,12 @@ use crate::protocol::{
 };
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+)]
 pub enum NetworkMessage {
     Transaction(Transaction),
 
@@ -77,6 +90,22 @@ impl Network {
     fn message_within_limits(
         message: &NetworkMessage,
     ) -> bool {
+        let serialized_size_ok =
+            serde_json::to_vec(
+                message,
+            )
+            .map(
+                |bytes| {
+                    bytes.len()
+                        <= MAX_NETWORK_MESSAGE_BYTES
+                },
+            )
+            .unwrap_or(false);
+
+        if !serialized_size_ok {
+            return false;
+        }
+
         match message {
             NetworkMessage::ChainChunkResponse {
                 blocks,
@@ -190,7 +219,7 @@ impl Network {
             &message,
         ) {
             println!(
-                "❌ Network mesajı reddedildi: Sync block limiti aşıldı"
+                "❌ Network mesajı reddedildi: Mesaj boyutu veya sync block limiti aşıldı"
             );
 
             return;
@@ -220,7 +249,7 @@ impl Network {
             &message,
         ) {
             println!(
-                "❌ Network mesajı reddedildi: Sync block limiti aşıldı"
+                "❌ Network mesajı reddedildi: Mesaj boyutu veya sync block limiti aşıldı"
             );
 
             return;

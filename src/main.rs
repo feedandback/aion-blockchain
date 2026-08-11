@@ -12,13 +12,98 @@ mod wallet;
 use crate::chain::Blockchain;
 use crate::consensus::Consensus;
 use crate::core::{Block, Transaction};
+use crate::network::tcp::TcpTransport;
 use crate::network::NetworkMessage;
 use crate::node::Node;
 use crate::state::State;
 use crate::storage::Storage;
 use crate::wallet::Wallet;
 
-fn main() {
+#[tokio::main]
+async fn main() {
+    let arguments:
+        Vec<String> =
+        std::env::args()
+            .collect();
+
+    if arguments.len() >= 3
+        && arguments[1] == "listen"
+    {
+        let listen_address =
+            arguments[2].clone();
+
+        let (
+            sender,
+            mut receiver,
+        ) =
+            tokio::sync::mpsc::channel(
+                16,
+            );
+
+        let listener_address =
+            listen_address.clone();
+
+        let listener_task =
+            tokio::spawn(
+                async move {
+                    TcpTransport::run_listener(
+                        &listener_address,
+                        sender,
+                    )
+                    .await
+                },
+            );
+
+        println!(
+            "AION peer dinleniyor: {}",
+            listen_address
+        );
+
+        if let Some((
+            message,
+            peer_address,
+        )) =
+            receiver.recv().await
+        {
+            println!(
+                "✅ Gerçek TCP mesajı alındı: {:?}",
+                message
+            );
+
+            println!(
+                "Peer: {}",
+                peer_address
+            );
+        }
+
+        listener_task.abort();
+
+        return;
+    }
+
+    if arguments.len() >= 3
+        && arguments[1] == "send"
+    {
+        let peer_address =
+            arguments[2].clone();
+
+        TcpTransport::send_to(
+            &peer_address,
+            &NetworkMessage::SyncRequest,
+        )
+        .await
+        .expect(
+            "Gerçek TCP mesajı gönderilemedi",
+        );
+
+        println!(
+            "✅ SyncRequest gerçek TCP üzerinden gönderildi: {}",
+            peer_address
+        );
+
+        return;
+    }
+
     let wallet_password =
         std::env::var(
             "AION_WALLET_PASSWORD",
@@ -26,6 +111,75 @@ fn main() {
         .expect(
             "AION_WALLET_PASSWORD ortam değişkeni tanımlı değil",
         );
+
+    // ==========================
+    // GERÇEK TCP LOOPBACK TESTİ
+    // ==========================
+
+    let tcp_listener =
+        TcpTransport::bind(
+            "127.0.0.1:0",
+        )
+        .await
+        .expect(
+            "TCP test listener başlatılamadı",
+        );
+
+    let tcp_address =
+        tcp_listener
+            .local_addr()
+            .expect(
+                "TCP test adresi alınamadı",
+            )
+            .to_string();
+
+    let tcp_server =
+        tokio::spawn(
+            async move {
+                TcpTransport::accept_one(
+                    &tcp_listener,
+                )
+                .await
+            },
+        );
+
+    TcpTransport::send_to(
+        &tcp_address,
+        &NetworkMessage::SyncRequest,
+    )
+    .await
+    .expect(
+        "TCP test mesajı gönderilemedi",
+    );
+
+    let (
+        tcp_received_message,
+        tcp_peer,
+    ) =
+        tcp_server
+            .await
+            .expect(
+                "TCP test görevi tamamlanamadı",
+            )
+            .expect(
+                "TCP test mesajı alınamadı",
+            );
+
+    let tcp_loopback_ok =
+        matches!(
+            tcp_received_message,
+            NetworkMessage::SyncRequest
+        );
+
+    println!(
+        "🌐 TCP P2P loopback mesaj testi başarılı mı: {}",
+        tcp_loopback_ok
+    );
+
+    println!(
+        "TCP test peer: {}",
+        tcp_peer
+    );
 
     // ==========================
     // KALICI WALLET YÜKLEME
