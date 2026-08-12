@@ -658,6 +658,60 @@ impl Network {
             .len()
     }
 
+    pub async fn broadcast_to_peers(
+        &mut self,
+        wallet: &Wallet,
+        listen_address: &str,
+        message: NetworkMessage,
+    ) -> (
+        usize,
+        usize,
+    ) {
+        if !Self::message_within_limits(
+            &message,
+        ) {
+            println!(
+                "❌ Network mesajı reddedildi: Mesaj boyutu veya protokol limiti aşıldı"
+            );
+
+            return (
+                0,
+                0,
+            );
+        }
+
+        Self::print_message_summary(
+            &message,
+        );
+
+        let peer_addresses =
+            self.peers.clone();
+
+        println!(
+            "Gerçek P2P broadcast peer sayısı: {}",
+            peer_addresses.len()
+        );
+
+        let result =
+            tcp::TcpTransport::broadcast_authenticated(
+                &peer_addresses,
+                wallet,
+                listen_address,
+                &message,
+            )
+            .await;
+
+        self.push_message_history(
+            message.clone(),
+        );
+
+        self.push_inbox(
+            message,
+        );
+
+        result
+    }
+
     pub fn broadcast(
         &mut self,
         message: NetworkMessage,

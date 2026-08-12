@@ -409,32 +409,55 @@ async fn main() {
         let test_wallet =
             Wallet::new();
 
+        let mut network =
+            Network::new();
+
+        for peer_address
+            in peer_addresses
+        {
+            let added =
+                network.add_peer(
+                    peer_address,
+                );
+
+            if !added {
+                panic!(
+                    "Broadcast peer kaydı eklenemedi"
+                );
+            }
+        }
+
         let (
             success_count,
             failure_count,
         ) =
-            TcpTransport::broadcast_authenticated(
-                &peer_addresses,
-                &test_wallet,
-                "127.0.0.1:7003",
-                &NetworkMessage::SyncRequest,
-            )
-            .await;
+            network
+                .broadcast_to_peers(
+                    &test_wallet,
+                    "127.0.0.1:7003",
+                    NetworkMessage::SyncRequest,
+                )
+                .await;
 
         println!(
-            "✅ Broadcast başarılı peer sayısı: {}",
+            "✅ Network broadcast başarılı peer sayısı: {}",
             success_count
         );
 
         println!(
-            "❌ Broadcast başarısız peer sayısı: {}",
+            "❌ Network broadcast başarısız peer sayısı: {}",
             failure_count
         );
 
         println!(
-            "✅ İki peer broadcast testi başarılı mı: {}",
+            "✅ Network katmanı iki peer broadcast testi başarılı mı: {}",
             success_count == 2
                 && failure_count == 0
+        );
+
+        println!(
+            "Network mesaj geçmişi: {}",
+            network.message_count()
         );
 
         return;
