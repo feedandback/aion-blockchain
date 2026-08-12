@@ -397,6 +397,49 @@ async fn main() {
         return;
     }
 
+    if arguments.len() >= 4
+        && arguments[1] == "broadcast"
+    {
+        let peer_addresses =
+            vec![
+                arguments[2].clone(),
+                arguments[3].clone(),
+            ];
+
+        let test_wallet =
+            Wallet::new();
+
+        let (
+            success_count,
+            failure_count,
+        ) =
+            TcpTransport::broadcast_authenticated(
+                &peer_addresses,
+                &test_wallet,
+                "127.0.0.1:7003",
+                &NetworkMessage::SyncRequest,
+            )
+            .await;
+
+        println!(
+            "✅ Broadcast başarılı peer sayısı: {}",
+            success_count
+        );
+
+        println!(
+            "❌ Broadcast başarısız peer sayısı: {}",
+            failure_count
+        );
+
+        println!(
+            "✅ İki peer broadcast testi başarılı mı: {}",
+            success_count == 2
+                && failure_count == 0
+        );
+
+        return;
+    }
+
     if arguments.len() >= 3
         && arguments[1] == "send"
     {

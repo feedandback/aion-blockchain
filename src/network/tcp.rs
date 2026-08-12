@@ -637,6 +637,57 @@ impl TcpTransport {
         }
     }
 
+    pub async fn broadcast_authenticated(
+        peer_addresses: &[String],
+        wallet: &Wallet,
+        listen_address: &str,
+        message: &NetworkMessage,
+    ) -> (
+        usize,
+        usize,
+    ) {
+        let mut success_count =
+            0usize;
+
+        let mut failure_count =
+            0usize;
+
+        for peer_address in peer_addresses {
+            match Self::send_authenticated_message(
+                peer_address,
+                wallet,
+                listen_address,
+                message,
+            )
+            .await
+            {
+                Ok(()) => {
+                    success_count += 1;
+
+                    println!(
+                        "✅ P2P broadcast gönderildi: {}",
+                        peer_address
+                    );
+                }
+
+                Err(error) => {
+                    failure_count += 1;
+
+                    println!(
+                        "❌ P2P broadcast başarısız: {} ({})",
+                        peer_address,
+                        error
+                    );
+                }
+            }
+        }
+
+        (
+            success_count,
+            failure_count,
+        )
+    }
+
     pub async fn send_authenticated_message(
         address: &str,
         wallet: &Wallet,
