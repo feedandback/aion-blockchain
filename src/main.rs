@@ -131,20 +131,42 @@ async fn main() {
         let peer_address =
             arguments[2].clone();
 
+        let test_wallet =
+            Wallet::new();
+
+        let listen_address =
+            "127.0.0.1:7004"
+                .to_string();
+
+        let protocol_version =
+            Network::protocol_version()
+                + 1;
+
+        let public_key =
+            test_wallet
+                .public_key_hex();
+
+        let signature =
+            test_wallet
+                .sign_node_handshake(
+                    &listen_address,
+                    crate::protocol::NETWORK_ID,
+                    protocol_version,
+                );
+
         let wrong_version_handshake =
             NetworkMessage::Handshake {
                 node_id:
-                    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                    test_wallet
+                        .node_id()
                         .to_string(),
-                listen_address:
-                    "127.0.0.1:7004"
-                        .to_string(),
+                public_key,
+                listen_address,
                 network_id:
                     crate::protocol::NETWORK_ID
                         .to_string(),
-                protocol_version:
-                    Network::protocol_version()
-                        + 1,
+                protocol_version,
+                signature,
             };
 
         TcpTransport::send_to(
@@ -171,19 +193,44 @@ async fn main() {
         let peer_address =
             arguments[2].clone();
 
+        let test_wallet =
+            Wallet::new();
+
+        let listen_address =
+            "127.0.0.1:7003"
+                .to_string();
+
+        let wrong_network_id =
+            "wrong-aion-network"
+                .to_string();
+
+        let protocol_version =
+            Network::protocol_version();
+
+        let public_key =
+            test_wallet
+                .public_key_hex();
+
+        let signature =
+            test_wallet
+                .sign_node_handshake(
+                    &listen_address,
+                    &wrong_network_id,
+                    protocol_version,
+                );
+
         let wrong_handshake =
             NetworkMessage::Handshake {
                 node_id:
-                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    test_wallet
+                        .node_id()
                         .to_string(),
-                listen_address:
-                    "127.0.0.1:7003"
-                        .to_string(),
+                public_key,
+                listen_address,
                 network_id:
-                    "wrong-aion-network"
-                        .to_string(),
-                protocol_version:
-                    Network::protocol_version(),
+                    wrong_network_id,
+                protocol_version,
+                signature,
             };
 
         TcpTransport::send_to(
@@ -209,10 +256,12 @@ async fn main() {
         let peer_address =
             arguments[2].clone();
 
+        let test_wallet =
+            Wallet::new();
+
         let handshake =
             Network::create_handshake(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    .to_string(),
+                &test_wallet,
                 "127.0.0.1:7002"
                     .to_string(),
             );

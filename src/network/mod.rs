@@ -9,6 +9,7 @@ use crate::core::{
     Block,
     Transaction,
 };
+use crate::wallet::Wallet;
 use crate::protocol::{
     is_fixed_hex,
     ADDRESS_HEX_LENGTH,
@@ -32,9 +33,11 @@ use crate::protocol::{
 pub enum NetworkMessage {
     Handshake {
         node_id: String,
+        public_key: String,
         listen_address: String,
         network_id: String,
         protocol_version: u32,
+        signature: String,
     },
 
     HandshakeAck {
@@ -105,16 +108,35 @@ impl Network {
     }
 
     pub fn create_handshake(
-        node_id: String,
+        wallet: &Wallet,
         listen_address: String,
     ) -> NetworkMessage {
+        let node_id =
+            wallet
+                .node_id()
+                .to_string();
+
+        let public_key =
+            wallet
+                .public_key_hex();
+
+        let signature =
+            wallet
+                .sign_node_handshake(
+                    &listen_address,
+                    NETWORK_ID,
+                    NETWORK_PROTOCOL_VERSION,
+                );
+
         NetworkMessage::Handshake {
             node_id,
+            public_key,
             listen_address,
             network_id:
                 NETWORK_ID.to_string(),
             protocol_version:
                 NETWORK_PROTOCOL_VERSION,
+            signature,
         }
     }
 
@@ -182,14 +204,20 @@ impl Network {
 
     fn handshake_fields_valid(
         node_id: &str,
+        public_key: &str,
         listen_address: &str,
         network_id: &str,
         protocol_version: u32,
+        signature: &str,
     ) -> bool {
         is_fixed_hex(
             node_id,
             ADDRESS_HEX_LENGTH,
         )
+            && is_fixed_hex(
+                public_key,
+                ADDRESS_HEX_LENGTH,
+            )
             && !listen_address.is_empty()
             && listen_address.len()
                 <= MAX_PEER_ADDRESS_LENGTH
@@ -197,6 +225,14 @@ impl Network {
                 == NETWORK_ID
             && protocol_version
                 == NETWORK_PROTOCOL_VERSION
+            && Wallet::verify_node_handshake(
+                node_id,
+                public_key,
+                listen_address,
+                network_id,
+                protocol_version,
+                signature,
+            )
     }
 
     fn handshake_ack_fields_valid(
@@ -236,15 +272,19 @@ impl Network {
         match message {
             NetworkMessage::Handshake {
                 node_id,
+                public_key,
                 listen_address,
                 network_id,
                 protocol_version,
+                signature,
             } => {
                 Self::handshake_fields_valid(
                     node_id,
+                    public_key,
                     listen_address,
                     network_id,
                     *protocol_version,
+                    signature,
                 )
             }
 
@@ -286,6 +326,7 @@ impl Network {
                 listen_address,
                 network_id,
                 protocol_version,
+                ..
             } => {
                 println!(
                     "📡 Network mesajı yayınlandı: Handshake node={} address={} network={} protocol={}",
@@ -392,12 +433,14 @@ impl Network {
         node_id: String,
         listen_address: String,
     ) -> bool {
-        if !Self::handshake_fields_valid(
+        if !is_fixed_hex(
             &node_id,
-            &listen_address,
-            NETWORK_ID,
-            NETWORK_PROTOCOL_VERSION,
-        ) {
+            ADDRESS_HEX_LENGTH,
+        )
+            || listen_address.is_empty()
+            || listen_address.len()
+                > MAX_PEER_ADDRESS_LENGTH
+        {
             return false;
         }
 
@@ -521,6 +564,7 @@ impl Network {
                 listen_address,
                 network_id,
                 protocol_version,
+                ..
             } => {
                 let registered =
                     self.add_peer_identity(
