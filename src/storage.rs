@@ -6,10 +6,7 @@ use std::io::{
     Read,
     Write,
 };
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::PathBuf;
 
 use argon2::Argon2;
 use chacha20poly1305::{
@@ -25,8 +22,11 @@ use chacha20poly1305::{
 
 use crate::core::Block;
 
-const DATA_DIRECTORY: &str =
+const DEFAULT_DATA_DIRECTORY: &str =
     "data";
+
+const DATA_DIRECTORY_ENV: &str =
+    "AION_DATA_DIR";
 
 const BLOCKCHAIN_FILE_NAME: &str =
     "blockchain.json";
@@ -66,55 +66,74 @@ pub struct Storage;
 
 #[allow(dead_code)]
 impl Storage {
+    pub fn data_directory(
+    ) -> PathBuf {
+        match std::env::var(
+            DATA_DIRECTORY_ENV,
+        ) {
+            Ok(value)
+                if !value
+                    .trim()
+                    .is_empty() =>
+            {
+                PathBuf::from(
+                    value,
+                )
+            }
+
+            _ => {
+                PathBuf::from(
+                    DEFAULT_DATA_DIRECTORY,
+                )
+            }
+        }
+    }
+
     pub fn blockchain_path(
     ) -> PathBuf {
-        Path::new(
-            DATA_DIRECTORY,
-        )
-        .join(
-            BLOCKCHAIN_FILE_NAME,
-        )
+        Self::data_directory()
+            .join(
+                BLOCKCHAIN_FILE_NAME,
+            )
     }
 
     fn blockchain_temp_path(
     ) -> PathBuf {
-        Path::new(
-            DATA_DIRECTORY,
-        )
-        .join(
-            BLOCKCHAIN_TEMP_FILE_NAME,
-        )
+        Self::data_directory()
+            .join(
+                BLOCKCHAIN_TEMP_FILE_NAME,
+            )
     }
 
     pub fn wallets_path(
     ) -> PathBuf {
-        Path::new(
-            DATA_DIRECTORY,
-        )
-        .join(
-            WALLETS_FILE_NAME,
-        )
+        Self::data_directory()
+            .join(
+                WALLETS_FILE_NAME,
+            )
     }
 
     fn wallets_temp_path(
     ) -> PathBuf {
-        Path::new(
-            DATA_DIRECTORY,
-        )
-        .join(
-            WALLETS_TEMP_FILE_NAME,
-        )
+        Self::data_directory()
+            .join(
+                WALLETS_TEMP_FILE_NAME,
+            )
     }
 
     fn ensure_data_directory(
     ) -> Result<(), String> {
+        let data_directory =
+            Self::data_directory();
+
         fs::create_dir_all(
-            DATA_DIRECTORY,
+            &data_directory,
         )
         .map_err(
             |error| {
                 format!(
-                    "Data klasörü oluşturulamadı: {}",
+                    "Data klasörü oluşturulamadı ({}): {}",
+                    data_directory.display(),
                     error
                 )
             },
