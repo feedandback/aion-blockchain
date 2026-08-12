@@ -709,6 +709,32 @@ impl TcpTransport {
         .await
     }
 
+    pub async fn send_authenticated_request(
+        address: &str,
+        wallet: &Wallet,
+        listen_address: &str,
+        request: &NetworkMessage,
+    ) -> Result<NetworkMessage, String> {
+        let mut stream =
+            Self::connect_authenticated(
+                address,
+                wallet,
+                listen_address,
+            )
+            .await?;
+
+        Self::send_message(
+            &mut stream,
+            request,
+        )
+        .await?;
+
+        Self::read_message(
+            &mut stream,
+        )
+        .await
+    }
+
     pub async fn connect_authenticated(
         address: &str,
         wallet: &Wallet,
@@ -762,6 +788,43 @@ impl TcpTransport {
         }
 
         Ok(stream)
+    }
+
+    pub async fn accept_authenticated_request(
+        listener: &TcpListener,
+        wallet: &Wallet,
+    ) -> Result<
+        (
+            TcpStream,
+            String,
+            NetworkMessage,
+            NetworkMessage,
+        ),
+        String,
+    > {
+        let (
+            mut stream,
+            peer_address,
+            handshake,
+        ) =
+            Self::accept_authenticated(
+                listener,
+                wallet,
+            )
+            .await?;
+
+        let request =
+            Self::read_message(
+                &mut stream,
+            )
+            .await?;
+
+        Ok((
+            stream,
+            peer_address,
+            handshake,
+            request,
+        ))
     }
 
     pub async fn accept_authenticated(

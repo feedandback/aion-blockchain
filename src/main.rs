@@ -27,6 +27,139 @@ async fn main() {
             .collect();
 
     if arguments.len() >= 3
+        && arguments[1] == "chunk-listen"
+    {
+        let listen_address =
+            arguments[2].clone();
+
+        let listener =
+            TcpTransport::bind(
+                &listen_address,
+            )
+            .await
+            .expect(
+                "Chunk test listener başlatılamadı",
+            );
+
+        let listener_wallet =
+            Wallet::new();
+
+        println!(
+            "🌐 Chain chunk test listener aktif: {}",
+            listen_address
+        );
+
+        let (
+            mut stream,
+            peer_address,
+            _handshake,
+            request,
+        ) =
+            TcpTransport::accept_authenticated_request(
+                &listener,
+                &listener_wallet,
+            )
+            .await
+            .expect(
+                "Kimliği doğrulanmış chunk isteği alınamadı",
+            );
+
+        println!(
+            "✅ Kimliği doğrulanmış chunk isteği alındı: {:?}",
+            request
+        );
+
+        println!(
+            "Peer: {}",
+            peer_address
+        );
+
+        let start_index =
+            match request {
+                NetworkMessage::ChainChunkRequest {
+                    start_index,
+                } => start_index,
+
+                _ => {
+                    panic!(
+                        "Beklenen mesaj ChainChunkRequest değildi"
+                    );
+                }
+            };
+
+        let response =
+            NetworkMessage::ChainChunkResponse {
+                start_index,
+                total_blocks: 0,
+                blocks: Vec::new(),
+            };
+
+        TcpTransport::send_message(
+            &mut stream,
+            &response,
+        )
+        .await
+        .expect(
+            "ChainChunkResponse gönderilemedi",
+        );
+
+        println!(
+            "✅ ChainChunkResponse aynı doğrulanmış TCP bağlantısından gönderildi."
+        );
+
+        return;
+    }
+
+    if arguments.len() >= 3
+        && arguments[1] == "chunk-request"
+    {
+        let peer_address =
+            arguments[2].clone();
+
+        let requester_wallet =
+            Wallet::new();
+
+        let request =
+            NetworkMessage::ChainChunkRequest {
+                start_index: 0,
+            };
+
+        let response =
+            TcpTransport::send_authenticated_request(
+                &peer_address,
+                &requester_wallet,
+                "127.0.0.1:7004",
+                &request,
+            )
+            .await
+            .expect(
+                "Kimliği doğrulanmış ChainChunkRequest/Response başarısız",
+            );
+
+        println!(
+            "✅ ChainChunkResponse alındı: {:?}",
+            response
+        );
+
+        let valid_response =
+            matches!(
+                response,
+                NetworkMessage::ChainChunkResponse {
+                    start_index: 0,
+                    total_blocks: 0,
+                    blocks,
+                } if blocks.is_empty()
+            );
+
+        println!(
+            "✅ Aynı TCP bağlantısında chunk request/response başarılı mı: {}",
+            valid_response
+        );
+
+        return;
+    }
+
+    if arguments.len() >= 3
         && arguments[1] == "listen"
     {
         let listen_address =
