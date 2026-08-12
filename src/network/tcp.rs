@@ -434,6 +434,193 @@ impl TcpTransport {
         }
     }
 
+    pub async fn run_authenticated_listener(
+        address: &str,
+        wallet: Arc<Wallet>,
+        sender: mpsc::Sender<(
+            NetworkMessage,
+            String,
+        )>,
+    ) -> Result<(), String> {
+        let listener =
+            Self::bind(
+                address,
+            )
+            .await?;
+
+        let connection_limit =
+            Arc::new(
+                Semaphore::new(
+                    MAX_CONCURRENT_NETWORK_CONNECTIONS,
+                ),
+            );
+
+        println!(
+            "🌐 Kimliği doğrulanmış AION P2P listener aktif: {}",
+            address
+        );
+
+        loop {
+            if sender.is_closed() {
+                return Err(
+                    "P2P mesaj kanalı kapandı"
+                        .into(),
+                );
+            }
+
+            let permit =
+                connection_limit
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(
+                        |_| {
+                            "P2P bağlantı limiti kapandı"
+                                .to_string()
+                        },
+                    )?;
+
+            let (
+                stream,
+                peer_address,
+            ) =
+                Self::accept_connection(
+                    &listener,
+                )
+                .await?;
+
+            let peer_wallet =
+                wallet.clone();
+
+            let message_sender =
+                sender.clone();
+
+            tokio::spawn(
+                async move {
+                    let _permit =
+                        permit;
+
+                    let mut stream =
+                        stream;
+
+                    let handshake =
+                        match Self::read_message(
+                            &mut stream,
+                        )
+                        .await
+                        {
+                            Ok(message) => {
+                                message
+                            }
+
+                            Err(error) => {
+                                println!(
+                                    "❌ P2P handshake okunamadı: {}",
+                                    error
+                                );
+
+                                return;
+                            }
+                        };
+
+                    let challenge =
+                        Network::handshake_challenge(
+                            &handshake,
+                        )
+                        .unwrap_or("")
+                        .to_string();
+
+                    let mut validation_network =
+                        Network::new();
+
+                    validation_network.receive(
+                        handshake,
+                    );
+
+                    let accepted =
+                        validation_network
+                            .identified_peer_count()
+                            == 1;
+
+                    let handshake_ack =
+                        Network::create_handshake_ack(
+                            &peer_wallet,
+                            accepted,
+                            challenge,
+                        );
+
+                    if let Err(error) =
+                        Self::send_message(
+                            &mut stream,
+                            &handshake_ack,
+                        )
+                        .await
+                    {
+                        println!(
+                            "❌ HandshakeAck gönderilemedi: {}",
+                            error
+                        );
+
+                        return;
+                    }
+
+                    if !accepted {
+                        println!(
+                            "❌ Kimliği doğrulanmamış peer reddedildi: {}",
+                            peer_address
+                        );
+
+                        return;
+                    }
+
+                    println!(
+                        "✅ Kimliği doğrulanmış peer bağlandı: {}",
+                        peer_address
+                    );
+
+                    loop {
+                        let message =
+                            match Self::read_message(
+                                &mut stream,
+                            )
+                            .await
+                            {
+                                Ok(message) => {
+                                    message
+                                }
+
+                                Err(error) => {
+                                    println!(
+                                        "🔌 Peer bağlantısı kapandı: {} ({})",
+                                        peer_address,
+                                        error
+                                    );
+
+                                    break;
+                                }
+                            };
+
+                        if message_sender
+                            .send((
+                                message,
+                                peer_address
+                                    .clone(),
+                            ))
+                            .await
+                            .is_err()
+                        {
+                            println!(
+                                "❌ P2P mesaj kanalı kapandı"
+                            );
+
+                            break;
+                        }
+                    }
+                },
+            );
+        }
+    }
+
     pub async fn connect_authenticated(
         address: &str,
         wallet: &Wallet,

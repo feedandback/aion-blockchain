@@ -32,97 +32,85 @@ async fn main() {
         let listen_address =
             arguments[2].clone();
 
-        let listener =
-            TcpTransport::bind(
-                &listen_address,
-            )
-            .await
-            .expect(
-                "TCP listener başlatılamadı",
-            );
-
         let listener_wallet =
-            Wallet::new();
-
-        println!(
-            "AION peer dinleniyor: {}",
-            listen_address
-        );
-
-        println!(
-            "🌐 AION TCP listener aktif: {}",
-            listen_address
-        );
-
-        let authenticated =
-            TcpTransport::accept_authenticated(
-                &listener,
-                &listener_wallet,
-            )
-            .await;
+            std::sync::Arc::new(
+                Wallet::new(),
+            );
 
         let (
-            mut stream,
-            peer_address,
-            handshake,
+            sender,
+            mut receiver,
         ) =
-            match authenticated {
-                Ok(result) => result,
+            tokio::sync::mpsc::channel(
+                32,
+            );
 
-                Err(error) => {
-                    println!(
-                        "❌ Kimliği doğrulanmamış P2P bağlantısı reddedildi: {}",
-                        error
-                    );
+        let listener_address =
+            listen_address.clone();
 
-                    return;
-                }
-            };
+        let server_wallet =
+            listener_wallet.clone();
 
-        println!(
-            "✅ Gerçek TCP handshake doğrulandı: {:?}",
-            handshake
-        );
-
-        println!(
-            "Peer: {}",
-            peer_address
-        );
-
-        let mut test_network =
-            Network::new();
-
-        test_network.receive(
-            handshake,
-        );
-
-        println!(
-            "✅ Tanımlanan peer sayısı: {}",
-            test_network
-                .identified_peer_count()
-        );
-
-        let session_message =
-            TcpTransport::read_message(
-                &mut stream,
-            )
-            .await
-            .expect(
-                "Handshake sonrası P2P mesajı okunamadı",
+        let server_task =
+            tokio::spawn(
+                async move {
+                    TcpTransport::run_authenticated_listener(
+                        &listener_address,
+                        server_wallet,
+                        sender,
+                    )
+                    .await
+                },
             );
 
         println!(
-            "✅ Kimliği doğrulanmış P2P oturumunda mesaj alındı: {:?}",
-            session_message
+            "AION sürekli P2P listener başlatıldı: {}",
+            listen_address
         );
 
-        test_network.receive(
-            session_message,
-        );
+        let mut received_count =
+            0usize;
+
+        while received_count < 2 {
+            let (
+                message,
+                peer_address,
+            ) =
+                receiver
+                    .recv()
+                    .await
+                    .expect(
+                        "P2P mesaj kanalı beklenmedik şekilde kapandı",
+                    );
+
+            println!(
+                "✅ Kimliği doğrulanmış peer mesajı: {:?}",
+                message
+            );
+
+            println!(
+                "Peer: {}",
+                peer_address
+            );
+
+            if matches!(
+                message,
+                NetworkMessage::SyncRequest
+            ) {
+                received_count += 1;
+
+                println!(
+                    "✅ SyncRequest sayısı: {}",
+                    received_count
+                );
+            }
+        }
 
         println!(
-            "✅ Handshake sonrası SyncRequest işlendi."
+            "✅ Sürekli listener iki ayrı peer mesajını başarıyla işledi."
         );
+
+        server_task.abort();
 
         return;
     }
