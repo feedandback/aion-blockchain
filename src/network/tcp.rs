@@ -637,6 +637,27 @@ impl TcpTransport {
         }
     }
 
+    pub async fn send_authenticated_message(
+        address: &str,
+        wallet: &Wallet,
+        listen_address: &str,
+        message: &NetworkMessage,
+    ) -> Result<(), String> {
+        let mut stream =
+            Self::connect_authenticated(
+                address,
+                wallet,
+                listen_address,
+            )
+            .await?;
+
+        Self::send_message(
+            &mut stream,
+            message,
+        )
+        .await
+    }
+
     pub async fn connect_authenticated(
         address: &str,
         wallet: &Wallet,

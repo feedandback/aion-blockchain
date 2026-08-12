@@ -406,33 +406,20 @@ async fn main() {
         let test_wallet =
             Wallet::new();
 
-        let mut stream =
-            TcpTransport::connect_authenticated(
-                &peer_address,
-                &test_wallet,
-                "127.0.0.1:7002",
-            )
-            .await
-            .expect(
-                "Kimliği doğrulanmış P2P bağlantısı kurulamadı",
-            );
-
-        println!(
-            "✅ Kimliği doğrulanmış P2P oturumu kuruldu: {}",
-            peer_address
-        );
-
-        TcpTransport::send_message(
-            &mut stream,
+        TcpTransport::send_authenticated_message(
+            &peer_address,
+            &test_wallet,
+            "127.0.0.1:7002",
             &NetworkMessage::SyncRequest,
         )
         .await
         .expect(
-            "Handshake sonrası SyncRequest gönderilemedi",
+            "Kimliği doğrulanmış P2P mesajı gönderilemedi",
         );
 
         println!(
-            "✅ Kimliği doğrulanmış P2P oturumunda SyncRequest gönderildi."
+            "✅ SyncRequest kimliği doğrulanmış gerçek TCP üzerinden gönderildi: {}",
+            peer_address
         );
 
         return;
