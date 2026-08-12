@@ -49,6 +49,31 @@ impl TcpTransport {
         )
     }
 
+    pub async fn accept_connection(
+        listener: &TcpListener,
+    ) -> Result<(TcpStream, String), String> {
+        let (
+            stream,
+            peer_address,
+        ) =
+            listener
+                .accept()
+                .await
+                .map_err(
+                    |error| {
+                        format!(
+                            "TCP peer kabul edilemedi: {}",
+                            error
+                        )
+                    },
+                )?;
+
+        Ok((
+            stream,
+            peer_address.to_string(),
+        ))
+    }
+
     pub async fn send_message(
         stream: &mut TcpStream,
         message: &NetworkMessage,
@@ -281,6 +306,28 @@ impl TcpTransport {
                 );
             }
         }
+    }
+
+    pub async fn send_and_receive(
+        address: &str,
+        message: &NetworkMessage,
+    ) -> Result<NetworkMessage, String> {
+        let mut stream =
+            Self::connect(
+                address,
+            )
+            .await?;
+
+        Self::send_message(
+            &mut stream,
+            message,
+        )
+        .await?;
+
+        Self::read_message(
+            &mut stream,
+        )
+        .await
     }
 
     pub async fn send_to(

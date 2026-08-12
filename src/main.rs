@@ -32,26 +32,13 @@ async fn main() {
         let listen_address =
             arguments[2].clone();
 
-        let (
-            sender,
-            mut receiver,
-        ) =
-            tokio::sync::mpsc::channel(
-                16,
-            );
-
-        let listener_address =
-            listen_address.clone();
-
-        let listener_task =
-            tokio::spawn(
-                async move {
-                    TcpTransport::run_listener(
-                        &listener_address,
-                        sender,
-                    )
-                    .await
-                },
+        let listener =
+            TcpTransport::bind(
+                &listen_address,
+            )
+            .await
+            .expect(
+                "TCP listener başlatılamadı",
             );
 
         println!(
@@ -59,37 +46,80 @@ async fn main() {
             listen_address
         );
 
-        if let Some((
-            message,
+        println!(
+            "🌐 AION TCP listener aktif: {}",
+            listen_address
+        );
+
+        let (
+            mut stream,
             peer_address,
-        )) =
-            receiver.recv().await
-        {
-            println!(
-                "✅ Gerçek TCP mesajı alındı: {:?}",
-                message
+        ) =
+            TcpTransport::accept_connection(
+                &listener,
+            )
+            .await
+            .expect(
+                "TCP bağlantısı kabul edilemedi",
             );
 
-            println!(
-                "Peer: {}",
-                peer_address
+        let message =
+            TcpTransport::read_message(
+                &mut stream,
+            )
+            .await
+            .expect(
+                "TCP mesajı okunamadı",
             );
 
-            let mut test_network =
-                Network::new();
+        println!(
+            "✅ Gerçek TCP mesajı alındı: {:?}",
+            message
+        );
 
-            test_network.receive(
-                message,
+        println!(
+            "Peer: {}",
+            peer_address
+        );
+
+        let mut test_network =
+            Network::new();
+
+        test_network.receive(
+            message,
+        );
+
+        let accepted =
+            test_network
+                .identified_peer_count()
+                == 1;
+
+        println!(
+            "✅ Tanımlanan peer sayısı: {}",
+            test_network
+                .identified_peer_count()
+        );
+
+        let handshake_ack =
+            Network::create_handshake_ack(
+                "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    .to_string(),
+                accepted,
             );
 
-            println!(
-                "✅ Tanımlanan peer sayısı: {}",
-                test_network
-                    .identified_peer_count()
-            );
-        }
+        TcpTransport::send_message(
+            &mut stream,
+            &handshake_ack,
+        )
+        .await
+        .expect(
+            "HandshakeAck gönderilemedi",
+        );
 
-        listener_task.abort();
+        println!(
+            "✅ HandshakeAck gönderildi. Kabul: {}",
+            accepted
+        );
 
         return;
     }
@@ -187,19 +217,43 @@ async fn main() {
                     .to_string(),
             );
 
-        TcpTransport::send_to(
-            &peer_address,
-            &handshake,
-        )
-        .await
-        .expect(
-            "Gerçek TCP handshake gönderilemedi",
-        );
+        let response =
+            TcpTransport::send_and_receive(
+                &peer_address,
+                &handshake,
+            )
+            .await
+            .expect(
+                "Gerçek TCP handshake veya ACK işlemi başarısız",
+            );
 
         println!(
             "✅ Handshake gerçek TCP üzerinden gönderildi: {}",
             peer_address
         );
+
+        println!(
+            "✅ Handshake cevabı alındı: {:?}",
+            response
+        );
+
+        match response {
+            NetworkMessage::HandshakeAck {
+                accepted,
+                ..
+            } => {
+                println!(
+                    "✅ Peer handshake kabul durumu: {}",
+                    accepted
+                );
+            }
+
+            _ => {
+                panic!(
+                    "Beklenen HandshakeAck alınmadı"
+                );
+            }
+        }
 
         return;
     }
