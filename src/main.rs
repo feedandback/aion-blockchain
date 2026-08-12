@@ -237,22 +237,20 @@ async fn main() {
             response
         );
 
-        match response {
-            NetworkMessage::HandshakeAck {
-                accepted,
-                ..
-            } => {
-                println!(
-                    "✅ Peer handshake kabul durumu: {}",
-                    accepted
-                );
-            }
+        let handshake_ack_valid =
+            Network::validate_handshake_ack(
+                &response,
+            );
 
-            _ => {
-                panic!(
-                    "Beklenen HandshakeAck alınmadı"
-                );
-            }
+        println!(
+            "✅ HandshakeAck doğrulandı mı: {}",
+            handshake_ack_valid
+        );
+
+        if !handshake_ack_valid {
+            panic!(
+                "HandshakeAck geçersiz"
+            );
         }
 
         return;

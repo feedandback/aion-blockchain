@@ -132,6 +132,28 @@ impl Network {
         }
     }
 
+    pub fn validate_handshake_ack(
+        message: &NetworkMessage,
+    ) -> bool {
+        match message {
+            NetworkMessage::HandshakeAck {
+                node_id,
+                network_id,
+                protocol_version,
+                accepted,
+            } => {
+                *accepted
+                    && Self::handshake_ack_fields_valid(
+                        node_id,
+                        network_id,
+                        *protocol_version,
+                    )
+            }
+
+            _ => false,
+        }
+    }
+
     fn push_message_history(
         &mut self,
         message: NetworkMessage,
