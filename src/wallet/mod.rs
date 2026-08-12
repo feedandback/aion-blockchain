@@ -104,6 +104,12 @@ impl Wallet {
         &self.address
     }
 
+    pub fn node_id(
+        &self,
+    ) -> &str {
+        &self.address
+    }
+
     pub fn public_key_hex(
         &self,
     ) -> String {
@@ -123,6 +129,87 @@ impl Wallet {
 
         hex::encode(
             signature.to_bytes(),
+        )
+    }
+
+    pub fn node_handshake_message(
+        node_id: &str,
+        public_key_hex: &str,
+        listen_address: &str,
+        network_id: &str,
+        protocol_version: u32,
+    ) -> Vec<u8> {
+        format!(
+            "AION_P2P_HANDSHAKE_V1\nnode_id={}\npublic_key={}\nlisten_address={}\nnetwork_id={}\nprotocol_version={}",
+            node_id,
+            public_key_hex,
+            listen_address,
+            network_id,
+            protocol_version
+        )
+        .into_bytes()
+    }
+
+    pub fn sign_node_handshake(
+        &self,
+        listen_address: &str,
+        network_id: &str,
+        protocol_version: u32,
+    ) -> String {
+        let public_key_hex =
+            self.public_key_hex();
+
+        let message =
+            Self::node_handshake_message(
+                self.node_id(),
+                &public_key_hex,
+                listen_address,
+                network_id,
+                protocol_version,
+            );
+
+        self.sign(
+            &message,
+        )
+    }
+
+    pub fn verify_node_handshake(
+        node_id: &str,
+        public_key_hex: &str,
+        listen_address: &str,
+        network_id: &str,
+        protocol_version: u32,
+        signature_hex: &str,
+    ) -> bool {
+        let derived_node_id =
+            match Self::address_from_public_key(
+                public_key_hex,
+            ) {
+                Some(address) => address,
+                None => {
+                    return false;
+                }
+            };
+
+        if derived_node_id
+            != node_id
+        {
+            return false;
+        }
+
+        let message =
+            Self::node_handshake_message(
+                node_id,
+                public_key_hex,
+                listen_address,
+                network_id,
+                protocol_version,
+            );
+
+        Self::verify(
+            public_key_hex,
+            &message,
+            signature_hex,
         )
     }
 

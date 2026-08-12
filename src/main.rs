@@ -433,6 +433,35 @@ async fn main() {
             == alice_wallet.address()
     );
 
+    let node_identity_signature =
+        alice_wallet
+            .sign_node_handshake(
+                "127.0.0.1:7002",
+                crate::protocol::NETWORK_ID,
+                Network::protocol_version(),
+            );
+
+    let signed_node_identity_ok =
+        Wallet::verify_node_handshake(
+            alice_wallet.node_id(),
+            &alice_wallet.public_key_hex(),
+            "127.0.0.1:7002",
+            crate::protocol::NETWORK_ID,
+            Network::protocol_version(),
+            &node_identity_signature,
+        );
+
+    println!(
+        "🔐 İmzalı node kimliği doğrulandı mı: {}",
+        signed_node_identity_ok
+    );
+
+    if !signed_node_identity_ok {
+        panic!(
+            "İmzalı node kimliği doğrulaması başarısız"
+        );
+    }
+
     // ==========================
     // GENESIS SUPPLY
     // ==========================
