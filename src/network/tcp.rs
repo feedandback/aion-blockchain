@@ -6,13 +6,18 @@ use tokio::net::{
     TcpListener,
     TcpStream,
 };
+use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::mpsc;
+use tokio::sync::{
+    mpsc,
+    Semaphore,
+};
 use tokio::time::timeout;
 
 use crate::network::NetworkMessage;
 use crate::protocol::{
+    MAX_CONCURRENT_NETWORK_CONNECTIONS,
     MAX_NETWORK_MESSAGE_BYTES,
     NETWORK_CONNECT_TIMEOUT_SECONDS,
     NETWORK_IO_TIMEOUT_SECONDS,
@@ -319,12 +324,31 @@ impl TcpTransport {
             )
             .await?;
 
+        let connection_limit =
+            Arc::new(
+                Semaphore::new(
+                    MAX_CONCURRENT_NETWORK_CONNECTIONS,
+                ),
+            );
+
         println!(
             "🌐 AION TCP listener aktif: {}",
             address
         );
 
+        println!(
+            "🛡️ Maksimum eşzamanlı TCP bağlantısı: {}",
+            MAX_CONCURRENT_NETWORK_CONNECTIONS
+        );
+
         loop {
+            if sender.is_closed() {
+                return Err(
+                    "TCP mesaj kanalı kapandı"
+                        .into(),
+                );
+            }
+
             let (
                 mut stream,
                 peer_address,
@@ -341,40 +365,68 @@ impl TcpTransport {
                         },
                     )?;
 
-            let message =
-                match Self::read_message(
-                    &mut stream,
-                )
-                .await
+            let permit =
+                match connection_limit
+                    .clone()
+                    .try_acquire_owned()
                 {
-                    Ok(message) => {
-                        message
-                    }
+                    Ok(permit) => permit,
 
-                    Err(error) => {
+                    Err(_) => {
                         println!(
-                            "❌ TCP mesajı reddedildi: {}",
-                            error
+                            "❌ TCP bağlantısı reddedildi: Eşzamanlı bağlantı limiti ({}) dolu",
+                            MAX_CONCURRENT_NETWORK_CONNECTIONS
                         );
 
                         continue;
                     }
                 };
 
-            if sender
-                .send((
-                    message,
-                    peer_address
-                        .to_string(),
-                ))
-                .await
-                .is_err()
-            {
-                return Err(
-                    "TCP mesaj kanalı kapandı"
-                        .into(),
-                );
-            }
+            let peer_address =
+                peer_address.to_string();
+
+            let message_sender =
+                sender.clone();
+
+            tokio::spawn(
+                async move {
+                    let _permit =
+                        permit;
+
+                    let message =
+                        match Self::read_message(
+                            &mut stream,
+                        )
+                        .await
+                        {
+                            Ok(message) => {
+                                message
+                            }
+
+                            Err(error) => {
+                                println!(
+                                    "❌ TCP mesajı reddedildi: {}",
+                                    error
+                                );
+
+                                return;
+                            }
+                        };
+
+                    if message_sender
+                        .send((
+                            message,
+                            peer_address,
+                        ))
+                        .await
+                        .is_err()
+                    {
+                        println!(
+                            "❌ TCP mesajı aktarılamadı: Mesaj kanalı kapandı"
+                        );
+                    }
+                },
+            );
         }
     }
 
