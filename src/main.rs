@@ -31,6 +31,467 @@ async fn main() {
             .collect();
 
     if arguments.len() >= 3
+        && arguments[1] == "sync-listen"
+    {
+        let listen_address =
+            arguments[2].clone();
+
+        let listener =
+            TcpTransport::bind(
+                &listen_address,
+            )
+            .await
+            .expect(
+                "Sync listener başlatılamadı",
+            );
+
+        let listener_wallet =
+            Wallet::new();
+
+        let stored_chain =
+            Storage::load_blockchain()
+                .expect(
+                    "Diskteki blockchain okunamadı",
+                )
+                .expect(
+                    "Diskte blockchain bulunamadı",
+                );
+
+        let total_blocks =
+            u64::try_from(
+                stored_chain.len(),
+            )
+            .expect(
+                "Toplam blok sayısı u64 sınırını aşıyor",
+            );
+
+        println!(
+            "🌐 Otomatik blockchain sync listener aktif: {}",
+            listen_address
+        );
+
+        println!(
+            "📚 Kaynak node zincir uzunluğu: {}",
+            total_blocks
+        );
+
+        loop {
+            let (
+                mut stream,
+                peer_address,
+                _handshake,
+                request,
+            ) =
+                TcpTransport::accept_authenticated_request(
+                    &listener,
+                    &listener_wallet,
+                )
+                .await
+                .expect(
+                    "Kimliği doğrulanmış sync isteği alınamadı",
+                );
+
+            let start_index =
+                match request {
+                    NetworkMessage::ChainChunkRequest {
+                        start_index,
+                    } => start_index,
+
+                    _ => {
+                        println!(
+                            "❌ Beklenmeyen sync mesajı alındı."
+                        );
+
+                        continue;
+                    }
+                };
+
+            let start =
+                usize::try_from(
+                    start_index,
+                )
+                .expect(
+                    "Sync başlangıç indeksi usize sınırını aşıyor",
+                );
+
+            let blocks =
+                if start
+                    >= stored_chain.len()
+                {
+                    Vec::new()
+                } else {
+                    let end =
+                        start
+                            .saturating_add(
+                                MAX_SYNC_BLOCKS_PER_MESSAGE,
+                            )
+                            .min(
+                                stored_chain.len(),
+                            );
+
+                    stored_chain[
+                        start..end
+                    ]
+                        .to_vec()
+                };
+
+            let sent_block_count =
+                blocks.len();
+
+            let response =
+                NetworkMessage::ChainChunkResponse {
+                    start_index,
+                    total_blocks,
+                    blocks,
+                };
+
+            TcpTransport::send_message(
+                &mut stream,
+                &response,
+            )
+            .await
+            .expect(
+                "Otomatik ChainChunkResponse gönderilemedi",
+            );
+
+            println!(
+                "✅ Sync chunk gönderildi. Peer: {} Başlangıç: {} Blok: {} / Toplam: {}",
+                peer_address,
+                start_index,
+                sent_block_count,
+                total_blocks
+            );
+
+            let sent_end =
+                start
+                    .saturating_add(
+                        sent_block_count,
+                    );
+
+            if sent_end
+                >= stored_chain.len()
+            {
+                println!(
+                    "✅ Kaynak node tüm blockchain chunk'larını gönderdi."
+                );
+
+                break;
+            }
+        }
+
+        return;
+    }
+
+    if arguments.len() >= 3
+        && arguments[1] == "sync-request"
+    {
+        let peer_address =
+            arguments[2].clone();
+
+        let requester_wallet =
+            Wallet::new();
+
+        let wallet_password =
+            std::env::var(
+                "AION_WALLET_PASSWORD",
+            )
+            .expect(
+                "Otomatik sync testi için AION_WALLET_PASSWORD tanımlı olmalı",
+            );
+
+        let (
+            alice_private_key,
+            bob_private_key,
+        ) =
+            Storage::load_wallet_private_keys(
+                &wallet_password,
+            )
+            .expect(
+                "Yerel wallet anahtarları yüklenemedi",
+            )
+            .expect(
+                "Yerel wallet dosyası bulunamadı",
+            );
+
+        let alice_wallet =
+            Wallet::from_private_key_hex(
+                &alice_private_key,
+            )
+            .expect(
+                "Yerel Alice private key geçersiz",
+            );
+
+        let bob_wallet =
+            Wallet::from_private_key_hex(
+                &bob_private_key,
+            )
+            .expect(
+                "Yerel Bob private key geçersiz",
+            );
+
+        let genesis_supply =
+            1000 * 1_000_000;
+
+        let mut sync_consensus =
+            Consensus::new();
+
+        sync_consensus.add_validator(
+            alice_wallet
+                .address()
+                .to_string(),
+            700,
+        );
+
+        sync_consensus.add_validator(
+            bob_wallet
+                .address()
+                .to_string(),
+            300,
+        );
+
+        let mut sync_state =
+            State::new();
+
+        sync_state.create_account(
+            alice_wallet
+                .address()
+                .to_string(),
+            genesis_supply,
+        );
+
+        sync_state.create_account(
+            bob_wallet
+                .address()
+                .to_string(),
+            0,
+        );
+
+        let sync_genesis =
+            Block::new(
+                0,
+                1754690000,
+                String::from("0"),
+                String::from("GENESIS"),
+                String::new(),
+                Vec::new(),
+            );
+
+        let mut sync_blockchain =
+            Blockchain::new(
+                sync_genesis,
+            );
+
+        sync_blockchain
+            .economy
+            .mint(
+                genesis_supply,
+            )
+            .expect(
+                "Sync genesis arzı oluşturulamadı",
+            );
+
+        let mut sync_node =
+            Node::new(
+                sync_blockchain,
+                sync_state,
+                sync_consensus,
+            );
+
+        let mut next_start =
+            0u64;
+
+        let mut expected_total:
+            Option<u64> =
+            None;
+
+        let mut chunk_count =
+            0usize;
+
+        loop {
+            let request =
+                NetworkMessage::ChainChunkRequest {
+                    start_index:
+                        next_start,
+                };
+
+            let response =
+                TcpTransport::send_authenticated_request(
+                    &peer_address,
+                    &requester_wallet,
+                    "127.0.0.1:7004",
+                    &request,
+                )
+                .await
+                .expect(
+                    "Otomatik ChainChunkRequest/Response başarısız",
+                );
+
+            let (
+                start_index,
+                total_blocks,
+                blocks,
+            ) =
+                match response {
+                    NetworkMessage::ChainChunkResponse {
+                        start_index,
+                        total_blocks,
+                        blocks,
+                    } => (
+                        start_index,
+                        total_blocks,
+                        blocks,
+                    ),
+
+                    _ => {
+                        panic!(
+                            "Beklenen mesaj ChainChunkResponse değildi"
+                        );
+                    }
+                };
+
+            if start_index
+                != next_start
+            {
+                panic!(
+                    "Sync chunk başlangıç indeksi uyuşmuyor. Beklenen: {}, Gelen: {}",
+                    next_start,
+                    start_index
+                );
+            }
+
+            if total_blocks == 0 {
+                panic!(
+                    "Sync toplam blok sayısı sıfır olamaz"
+                );
+            }
+
+            match expected_total {
+                Some(expected)
+                    if expected
+                        != total_blocks =>
+                {
+                    panic!(
+                        "Sync sırasında toplam blok sayısı değişti"
+                    );
+                }
+
+                None => {
+                    expected_total =
+                        Some(
+                            total_blocks,
+                        );
+                }
+
+                _ => {}
+            }
+
+            if blocks.is_empty() {
+                panic!(
+                    "Beklenmeyen boş blockchain chunk'ı"
+                );
+            }
+
+            if blocks.len()
+                > MAX_SYNC_BLOCKS_PER_MESSAGE
+            {
+                panic!(
+                    "Gelen blockchain chunk limiti aşıyor"
+                );
+            }
+
+            if blocks
+                .first()
+                .map(
+                    |block| {
+                        block.index
+                            == start_index
+                    },
+                )
+                != Some(true)
+            {
+                panic!(
+                    "Gelen chunk ilk block indexi geçersiz"
+                );
+            }
+
+            chunk_count += 1;
+
+            println!(
+                "📦 Sync chunk #{} alındı. Başlangıç: {} Blok: {} Toplam: {}",
+                chunk_count,
+                start_index,
+                blocks.len(),
+                total_blocks
+            );
+
+            let next_chunk =
+                sync_node
+                    .apply_chain_chunk(
+                        start_index,
+                        total_blocks,
+                        blocks,
+                    )
+                    .expect(
+                        "Gelen blockchain chunk Node doğrulamasından geçemedi",
+                    );
+
+            match next_chunk {
+                Some(next_index) => {
+                    println!(
+                        "➡️ Sonraki blockchain chunk isteniyor: {}",
+                        next_index
+                    );
+
+                    next_start =
+                        next_index;
+                }
+
+                None => {
+                    let final_total =
+                        expected_total
+                            .expect(
+                                "Sync toplam blok sayısı belirlenmedi",
+                            );
+
+                    let synchronized =
+                        sync_node
+                            .blockchain
+                            .chain
+                            .len()
+                            == final_total
+                                as usize;
+
+                    println!(
+                        "✅ Otomatik blockchain senkronizasyonu tamamlandı."
+                    );
+
+                    println!(
+                        "✅ Toplam alınan chunk: {}",
+                        chunk_count
+                    );
+
+                    println!(
+                        "✅ Senkronize zincir blok sayısı: {}",
+                        sync_node
+                            .blockchain
+                            .chain
+                            .len()
+                    );
+
+                    println!(
+                        "✅ Kaynak ve hedef zincir uzunluğu eşit mi: {}",
+                        synchronized
+                    );
+
+                    break;
+                }
+            }
+        }
+
+        return;
+    }
+
+    if arguments.len() >= 3
         && arguments[1] == "chunk-listen"
     {
         let listen_address =
