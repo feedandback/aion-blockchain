@@ -1076,6 +1076,19 @@ impl Node {
         ))
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn validate_and_apply_block_for_test(
+        &self,
+        block: Block,
+    ) -> Result<(Blockchain, State), String> {
+        self.validate_and_apply_block(
+            block,
+            &self.blockchain,
+            &self.state,
+        )
+    }
+
     // ==========================
     // MEMPOOL TEMİZLE
     // ==========================

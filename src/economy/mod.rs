@@ -13,6 +13,7 @@ pub struct Economy {
     pub minimum_fee: u64,
 
     // Fee dağılımı
+    #[allow(dead_code)]
     pub validator_fee_percent: u64,
 
     pub treasury_fee_percent: u64,
@@ -80,20 +81,44 @@ impl Economy {
         &self,
         fee: u64,
     ) -> (u64, u64, u64) {
-        let validator =
-            fee
-                * self.validator_fee_percent
-                / 100;
-
         let treasury =
-            fee
-                * self.treasury_fee_percent
-                / 100;
+            u64::try_from(
+                u128::from(fee)
+                    * u128::from(
+                        self.treasury_fee_percent,
+                    )
+                    / 100,
+            )
+            .expect(
+                "Treasury fee u64 aralığını aşıyor",
+            );
 
         let burn =
-            fee
-                * self.burn_fee_percent
-                / 100;
+            u64::try_from(
+                u128::from(fee)
+                    * u128::from(
+                        self.burn_fee_percent,
+                    )
+                    / 100,
+            )
+            .expect(
+                "Burn fee u64 aralığını aşıyor",
+            );
+
+        let validator =
+            fee.checked_sub(
+                treasury,
+            )
+            .and_then(
+                |remaining| {
+                    remaining.checked_sub(
+                        burn,
+                    )
+                },
+            )
+            .expect(
+                "Treasury ve burn payları toplam fee'yi aşıyor",
+            );
 
         (
             validator,
