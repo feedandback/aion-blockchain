@@ -1,5 +1,10 @@
 pub mod tcp;
 
+use std::time::{
+    SystemTime,
+    UNIX_EPOCH,
+};
+
 use serde::{
     Deserialize,
     Serialize,
@@ -15,6 +20,7 @@ use crate::protocol::{
     ADDRESS_HEX_LENGTH,
     MAX_NETWORK_INBOX_MESSAGES,
     MAX_NETWORK_MESSAGE_BYTES,
+    MAX_HANDSHAKE_AGE_SECONDS,
     MAX_NETWORK_MESSAGE_HISTORY,
     MAX_NETWORK_PEERS,
     MAX_PEER_ADDRESS_LENGTH,
@@ -37,6 +43,7 @@ pub enum NetworkMessage {
         listen_address: String,
         network_id: String,
         protocol_version: u32,
+        timestamp: u64,
         signature: String,
     },
 
@@ -45,6 +52,7 @@ pub enum NetworkMessage {
         public_key: String,
         network_id: String,
         protocol_version: u32,
+        timestamp: u64,
         accepted: bool,
         signature: String,
     },
@@ -104,6 +112,27 @@ impl Network {
         }
     }
 
+    pub fn current_timestamp(
+    ) -> u64 {
+        SystemTime::now()
+            .duration_since(
+                UNIX_EPOCH,
+            )
+            .unwrap_or_default()
+            .as_secs()
+    }
+
+    fn handshake_timestamp_valid(
+        timestamp: u64,
+    ) -> bool {
+        let now =
+            Self::current_timestamp();
+
+        now.abs_diff(
+            timestamp,
+        ) <= MAX_HANDSHAKE_AGE_SECONDS
+    }
+
     pub fn protocol_version(
     ) -> u32 {
         NETWORK_PROTOCOL_VERSION
@@ -122,12 +151,16 @@ impl Network {
             wallet
                 .public_key_hex();
 
+        let timestamp =
+            Self::current_timestamp();
+
         let signature =
             wallet
                 .sign_node_handshake(
                     &listen_address,
                     NETWORK_ID,
                     NETWORK_PROTOCOL_VERSION,
+                    timestamp,
                 );
 
         NetworkMessage::Handshake {
@@ -138,6 +171,7 @@ impl Network {
                 NETWORK_ID.to_string(),
             protocol_version:
                 NETWORK_PROTOCOL_VERSION,
+            timestamp,
             signature,
         }
     }
@@ -155,12 +189,16 @@ impl Network {
             wallet
                 .public_key_hex();
 
+        let timestamp =
+            Self::current_timestamp();
+
         let signature =
             wallet
                 .sign_node_handshake(
                     "HANDSHAKE_ACK",
                     NETWORK_ID,
                     NETWORK_PROTOCOL_VERSION,
+                    timestamp,
                 );
 
         NetworkMessage::HandshakeAck {
@@ -170,6 +208,7 @@ impl Network {
                 NETWORK_ID.to_string(),
             protocol_version:
                 NETWORK_PROTOCOL_VERSION,
+            timestamp,
             accepted,
             signature,
         }
@@ -184,6 +223,7 @@ impl Network {
                 public_key,
                 network_id,
                 protocol_version,
+                timestamp,
                 accepted,
                 signature,
             } => {
@@ -193,12 +233,16 @@ impl Network {
                         network_id,
                         *protocol_version,
                     )
+                    && Self::handshake_timestamp_valid(
+                        *timestamp,
+                    )
                     && Wallet::verify_node_handshake(
                         node_id,
                         public_key,
                         "HANDSHAKE_ACK",
                         network_id,
                         *protocol_version,
+                        *timestamp,
                         signature,
                     )
             }
@@ -239,6 +283,7 @@ impl Network {
         listen_address: &str,
         network_id: &str,
         protocol_version: u32,
+        timestamp: u64,
         signature: &str,
     ) -> bool {
         is_fixed_hex(
@@ -256,12 +301,16 @@ impl Network {
                 == NETWORK_ID
             && protocol_version
                 == NETWORK_PROTOCOL_VERSION
+            && Self::handshake_timestamp_valid(
+                timestamp,
+            )
             && Wallet::verify_node_handshake(
                 node_id,
                 public_key,
                 listen_address,
                 network_id,
                 protocol_version,
+                timestamp,
                 signature,
             )
     }
@@ -307,6 +356,7 @@ impl Network {
                 listen_address,
                 network_id,
                 protocol_version,
+                timestamp,
                 signature,
             } => {
                 Self::handshake_fields_valid(
@@ -315,6 +365,7 @@ impl Network {
                     listen_address,
                     network_id,
                     *protocol_version,
+                    *timestamp,
                     signature,
                 )
             }

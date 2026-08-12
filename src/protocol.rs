@@ -30,6 +30,10 @@ pub const NETWORK_IO_TIMEOUT_SECONDS: u64 = 10;
 // Aynı anda işlenebilecek maksimum TCP bağlantısı.
 pub const MAX_CONCURRENT_NETWORK_CONNECTIONS: usize = 64;
 
+// Handshake mesajları eskiyse kabul edilmez.
+// Replay saldırılarına karşı zaman penceresi.
+pub const MAX_HANDSHAKE_AGE_SECONDS: u64 = 120;
+
 // TCP üzerinden tek bir mesaj en fazla 8 MiB olabilir.
 // Block sayısı sınırından bağımsız ek DoS korumasıdır.
 pub const MAX_NETWORK_MESSAGE_BYTES: usize =

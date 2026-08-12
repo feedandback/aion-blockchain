@@ -128,6 +128,100 @@ async fn main() {
 
     if arguments.len() >= 3
         && arguments[1]
+            == "send-stale-handshake"
+    {
+        let peer_address =
+            arguments[2].clone();
+
+        let test_wallet =
+            Wallet::new();
+
+        let listen_address =
+            "127.0.0.1:7005"
+                .to_string();
+
+        let protocol_version =
+            Network::protocol_version();
+
+        let timestamp =
+            Network::current_timestamp()
+                .saturating_sub(
+                    crate::protocol::MAX_HANDSHAKE_AGE_SECONDS
+                        + 1,
+                );
+
+        let public_key =
+            test_wallet
+                .public_key_hex();
+
+        let signature =
+            test_wallet
+                .sign_node_handshake(
+                    &listen_address,
+                    crate::protocol::NETWORK_ID,
+                    protocol_version,
+                    timestamp,
+                );
+
+        let stale_handshake =
+            NetworkMessage::Handshake {
+                node_id:
+                    test_wallet
+                        .node_id()
+                        .to_string(),
+                public_key,
+                listen_address,
+                network_id:
+                    crate::protocol::NETWORK_ID
+                        .to_string(),
+                protocol_version,
+                timestamp,
+                signature,
+            };
+
+        let response =
+            TcpTransport::send_and_receive(
+                &peer_address,
+                &stale_handshake,
+            )
+            .await
+            .expect(
+                "Eski handshake testi başarısız",
+            );
+
+        println!(
+            "✅ Eski timestamp handshake gönderildi: {}",
+            timestamp
+        );
+
+        println!(
+            "Handshake cevabı: {:?}",
+            response
+        );
+
+        match response {
+            NetworkMessage::HandshakeAck {
+                accepted,
+                ..
+            } => {
+                println!(
+                    "✅ Eski handshake reddedildi mi: {}",
+                    !accepted
+                );
+            }
+
+            _ => {
+                panic!(
+                    "Beklenen HandshakeAck alınmadı"
+                );
+            }
+        }
+
+        return;
+    }
+
+    if arguments.len() >= 3
+        && arguments[1]
             == "send-wrong-version"
     {
         let peer_address =
@@ -148,12 +242,16 @@ async fn main() {
             test_wallet
                 .public_key_hex();
 
+        let timestamp =
+            Network::current_timestamp();
+
         let signature =
             test_wallet
                 .sign_node_handshake(
                     &listen_address,
                     crate::protocol::NETWORK_ID,
                     protocol_version,
+                    timestamp,
                 );
 
         let wrong_version_handshake =
@@ -168,6 +266,7 @@ async fn main() {
                     crate::protocol::NETWORK_ID
                         .to_string(),
                 protocol_version,
+                timestamp,
                 signature,
             };
 
@@ -213,12 +312,16 @@ async fn main() {
             test_wallet
                 .public_key_hex();
 
+        let timestamp =
+            Network::current_timestamp();
+
         let signature =
             test_wallet
                 .sign_node_handshake(
                     &listen_address,
                     &wrong_network_id,
                     protocol_version,
+                    timestamp,
                 );
 
         let wrong_handshake =
@@ -232,6 +335,7 @@ async fn main() {
                 network_id:
                     wrong_network_id,
                 protocol_version,
+                timestamp,
                 signature,
             };
 
@@ -484,12 +588,16 @@ async fn main() {
             == alice_wallet.address()
     );
 
+    let node_identity_timestamp =
+        Network::current_timestamp();
+
     let node_identity_signature =
         alice_wallet
             .sign_node_handshake(
                 "127.0.0.1:7002",
                 crate::protocol::NETWORK_ID,
                 Network::protocol_version(),
+                node_identity_timestamp,
             );
 
     let signed_node_identity_ok =
@@ -499,6 +607,7 @@ async fn main() {
             "127.0.0.1:7002",
             crate::protocol::NETWORK_ID,
             Network::protocol_version(),
+            node_identity_timestamp,
             &node_identity_signature,
         );
 

@@ -138,14 +138,16 @@ impl Wallet {
         listen_address: &str,
         network_id: &str,
         protocol_version: u32,
+        timestamp: u64,
     ) -> Vec<u8> {
         format!(
-            "AION_P2P_HANDSHAKE_V1\nnode_id={}\npublic_key={}\nlisten_address={}\nnetwork_id={}\nprotocol_version={}",
+            "AION_P2P_HANDSHAKE_V1\nnode_id={}\npublic_key={}\nlisten_address={}\nnetwork_id={}\nprotocol_version={}\ntimestamp={}",
             node_id,
             public_key_hex,
             listen_address,
             network_id,
-            protocol_version
+            protocol_version,
+            timestamp
         )
         .into_bytes()
     }
@@ -155,6 +157,7 @@ impl Wallet {
         listen_address: &str,
         network_id: &str,
         protocol_version: u32,
+        timestamp: u64,
     ) -> String {
         let public_key_hex =
             self.public_key_hex();
@@ -166,6 +169,7 @@ impl Wallet {
                 listen_address,
                 network_id,
                 protocol_version,
+                timestamp,
             );
 
         self.sign(
@@ -179,6 +183,7 @@ impl Wallet {
         listen_address: &str,
         network_id: &str,
         protocol_version: u32,
+        timestamp: u64,
         signature_hex: &str,
     ) -> bool {
         let derived_node_id =
@@ -204,6 +209,7 @@ impl Wallet {
                 listen_address,
                 network_id,
                 protocol_version,
+                timestamp,
             );
 
         Self::verify(
