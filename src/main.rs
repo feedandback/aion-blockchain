@@ -1,6 +1,3 @@
-
-
-
 mod chain;
 mod consensus;
 mod core;
@@ -66,7 +63,7 @@ async fn main() {
             );
 
         println!(
-            "🌐 Otomatik blockchain sync listener aktif: {}",
+            "🌐 Kalıcı oturumlu blockchain sync listener aktif: {}",
             listen_address
         );
 
@@ -75,20 +72,33 @@ async fn main() {
             total_blocks
         );
 
+        let (
+            mut stream,
+            peer_address,
+            _handshake,
+        ) =
+            TcpTransport::accept_authenticated(
+                &listener,
+                &listener_wallet,
+            )
+            .await
+            .expect(
+                "Kimliği doğrulanmış sync oturumu kurulamadı",
+            );
+
+        println!(
+            "✅ Sync peer kalıcı oturumla bağlandı: {}",
+            peer_address
+        );
+
         loop {
-            let (
-                mut stream,
-                peer_address,
-                _handshake,
-                request,
-            ) =
-                TcpTransport::accept_authenticated_request(
-                    &listener,
-                    &listener_wallet,
+            let request =
+                TcpTransport::read_message(
+                    &mut stream,
                 )
                 .await
                 .expect(
-                    "Kimliği doğrulanmış sync isteği alınamadı",
+                    "Kalıcı sync oturumunda istek okunamadı",
                 );
 
             let start_index =
@@ -151,12 +161,11 @@ async fn main() {
             )
             .await
             .expect(
-                "Otomatik ChainChunkResponse gönderilemedi",
+                "Kalıcı sync oturumunda ChainChunkResponse gönderilemedi",
             );
 
             println!(
-                "✅ Sync chunk gönderildi. Peer: {} Başlangıç: {} Blok: {} / Toplam: {}",
-                peer_address,
+                "✅ Sync chunk gönderildi. Başlangıç: {} Blok: {} / Toplam: {}",
                 start_index,
                 sent_block_count,
                 total_blocks
@@ -172,7 +181,7 @@ async fn main() {
                 >= stored_chain.len()
             {
                 println!(
-                    "✅ Kaynak node tüm blockchain chunk'larını gönderdi."
+                    "✅ Kaynak node tüm blockchain chunk'larını aynı TCP oturumunda gönderdi."
                 );
 
                 break;
@@ -297,6 +306,22 @@ async fn main() {
                 sync_consensus,
             );
 
+        let mut stream =
+            TcpTransport::connect_authenticated(
+                &peer_address,
+                &requester_wallet,
+                "127.0.0.1:7004",
+            )
+            .await
+            .expect(
+                "Kalıcı kimliği doğrulanmış sync oturumu kurulamadı",
+            );
+
+        println!(
+            "✅ Kalıcı sync TCP oturumu kuruldu: {}",
+            peer_address
+        );
+
         let mut next_start =
             0u64;
 
@@ -314,16 +339,22 @@ async fn main() {
                         next_start,
                 };
 
+            TcpTransport::send_message(
+                &mut stream,
+                &request,
+            )
+            .await
+            .expect(
+                "Kalıcı sync oturumunda ChainChunkRequest gönderilemedi",
+            );
+
             let response =
-                TcpTransport::send_authenticated_request(
-                    &peer_address,
-                    &requester_wallet,
-                    "127.0.0.1:7004",
-                    &request,
+                TcpTransport::read_message(
+                    &mut stream,
                 )
                 .await
                 .expect(
-                    "Otomatik ChainChunkRequest/Response başarısız",
+                    "Kalıcı sync oturumunda ChainChunkResponse okunamadı",
                 );
 
             let (
@@ -417,7 +448,7 @@ async fn main() {
             chunk_count += 1;
 
             println!(
-                "📦 Sync chunk #{} alındı. Başlangıç: {} Blok: {} Toplam: {}",
+                "📦 Sync chunk #{} aynı TCP oturumunda alındı. Başlangıç: {} Blok: {} Toplam: {}",
                 chunk_count,
                 start_index,
                 blocks.len(),
@@ -438,7 +469,7 @@ async fn main() {
             match next_chunk {
                 Some(next_index) => {
                     println!(
-                        "➡️ Sonraki blockchain chunk isteniyor: {}",
+                        "➡️ Aynı TCP oturumunda sonraki chunk isteniyor: {}",
                         next_index
                     );
 
@@ -462,7 +493,7 @@ async fn main() {
                                 as usize;
 
                     println!(
-                        "✅ Otomatik blockchain senkronizasyonu tamamlandı."
+                        "✅ Kalıcı TCP oturumunda blockchain senkronizasyonu tamamlandı."
                     );
 
                     println!(
