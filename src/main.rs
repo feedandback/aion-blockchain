@@ -100,10 +100,12 @@ async fn main() {
                 .identified_peer_count()
         );
 
+        let listener_wallet =
+            Wallet::new();
+
         let handshake_ack =
             Network::create_handshake_ack(
-                "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-                    .to_string(),
+                &listener_wallet,
                 accepted,
             );
 

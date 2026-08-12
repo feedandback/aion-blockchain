@@ -42,9 +42,11 @@ pub enum NetworkMessage {
 
     HandshakeAck {
         node_id: String,
+        public_key: String,
         network_id: String,
         protocol_version: u32,
         accepted: bool,
+        signature: String,
     },
 
     Transaction(Transaction),
@@ -141,16 +143,35 @@ impl Network {
     }
 
     pub fn create_handshake_ack(
-        node_id: String,
+        wallet: &Wallet,
         accepted: bool,
     ) -> NetworkMessage {
+        let node_id =
+            wallet
+                .node_id()
+                .to_string();
+
+        let public_key =
+            wallet
+                .public_key_hex();
+
+        let signature =
+            wallet
+                .sign_node_handshake(
+                    "HANDSHAKE_ACK",
+                    NETWORK_ID,
+                    NETWORK_PROTOCOL_VERSION,
+                );
+
         NetworkMessage::HandshakeAck {
             node_id,
+            public_key,
             network_id:
                 NETWORK_ID.to_string(),
             protocol_version:
                 NETWORK_PROTOCOL_VERSION,
             accepted,
+            signature,
         }
     }
 
@@ -160,15 +181,25 @@ impl Network {
         match message {
             NetworkMessage::HandshakeAck {
                 node_id,
+                public_key,
                 network_id,
                 protocol_version,
                 accepted,
+                signature,
             } => {
                 *accepted
                     && Self::handshake_ack_fields_valid(
                         node_id,
                         network_id,
                         *protocol_version,
+                    )
+                    && Wallet::verify_node_handshake(
+                        node_id,
+                        public_key,
+                        "HANDSHAKE_ACK",
+                        network_id,
+                        *protocol_version,
+                        signature,
                     )
             }
 
@@ -342,6 +373,7 @@ impl Network {
                 network_id,
                 protocol_version,
                 accepted,
+                ..
             } => {
                 println!(
                     "📡 Network mesajı yayınlandı: HandshakeAck node={} network={} protocol={} accepted={}",
@@ -586,6 +618,7 @@ impl Network {
                 network_id,
                 protocol_version,
                 accepted,
+                ..
             } => {
                 println!(
                     "📥 Handshake ACK alındı. Node: {} Network: {} Protocol: {} Kabul: {}",
