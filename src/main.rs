@@ -28,7 +28,7 @@ async fn main() {
             .collect();
 
     if arguments.len() >= 3
-        && arguments[1] == "sync-listen"
+        && arguments[1] == "chunk-sync-listen"
     {
         let listen_address =
             arguments[2].clone();
@@ -39,11 +39,35 @@ async fn main() {
             )
             .await
             .expect(
-                "Sync listener başlatılamadı",
+                "Çoklu chunk listener başlatılamadı",
             );
 
         let listener_wallet =
             Wallet::new();
+
+        println!(
+            "🌐 Çoklu chain chunk listener aktif: {}",
+            listen_address
+        );
+
+        let (
+            mut stream,
+            peer_address,
+            _handshake,
+        ) =
+            TcpTransport::accept_authenticated(
+                &listener,
+                &listener_wallet,
+            )
+            .await
+            .expect(
+                "Kimliği doğrulanmış çoklu chunk bağlantısı kurulamadı",
+            );
+
+        println!(
+            "✅ Çoklu chunk peer doğrulandı: {}",
+            peer_address
+        );
 
         let stored_chain =
             Storage::load_blockchain()
@@ -62,34 +86,13 @@ async fn main() {
                 "Toplam blok sayısı u64 sınırını aşıyor",
             );
 
-        println!(
-            "🌐 Kalıcı oturumlu blockchain sync listener aktif: {}",
-            listen_address
-        );
-
-        println!(
-            "📚 Kaynak node zincir uzunluğu: {}",
-            total_blocks
-        );
-
-        let (
-            mut stream,
-            peer_address,
-            _handshake,
-        ) =
-            TcpTransport::accept_authenticated(
-                &listener,
-                &listener_wallet,
-            )
-            .await
-            .expect(
-                "Kimliği doğrulanmış sync oturumu kurulamadı",
+        let test_chunk_size =
+            4usize.min(
+                MAX_SYNC_BLOCKS_PER_MESSAGE,
             );
 
-        println!(
-            "✅ Sync peer kalıcı oturumla bağlandı: {}",
-            peer_address
-        );
+        let mut served_chunk_count =
+            0usize;
 
         loop {
             let request =
@@ -98,7 +101,7 @@ async fn main() {
                 )
                 .await
                 .expect(
-                    "Kalıcı sync oturumunda istek okunamadı",
+                    "Çoklu ChainChunkRequest okunamadı",
                 );
 
             let start_index =
@@ -108,11 +111,9 @@ async fn main() {
                     } => start_index,
 
                     _ => {
-                        println!(
-                            "❌ Beklenmeyen sync mesajı alındı."
+                        panic!(
+                            "Beklenen mesaj ChainChunkRequest değildi"
                         );
-
-                        continue;
                     }
                 };
 
@@ -121,7 +122,7 @@ async fn main() {
                     start_index,
                 )
                 .expect(
-                    "Sync başlangıç indeksi usize sınırını aşıyor",
+                    "Chunk başlangıç indeksi usize sınırını aşıyor",
                 );
 
             let blocks =
@@ -133,7 +134,7 @@ async fn main() {
                     let end =
                         start
                             .saturating_add(
-                                MAX_SYNC_BLOCKS_PER_MESSAGE,
+                                test_chunk_size,
                             )
                             .min(
                                 stored_chain.len(),
@@ -161,51 +162,52 @@ async fn main() {
             )
             .await
             .expect(
-                "Kalıcı sync oturumunda ChainChunkResponse gönderilemedi",
+                "Çoklu ChainChunkResponse gönderilemedi",
             );
 
+            served_chunk_count += 1;
+
             println!(
-                "✅ Sync chunk gönderildi. Başlangıç: {} Blok: {} / Toplam: {}",
+                "✅ Chunk #{} gönderildi. Başlangıç: {} Gönderilen blok: {} Toplam zincir: {}",
+                served_chunk_count,
                 start_index,
                 sent_block_count,
                 total_blocks
             );
 
-            let sent_end =
+            let end_index =
                 start
                     .saturating_add(
                         sent_block_count,
                     );
 
-            if sent_end
+            if end_index
                 >= stored_chain.len()
             {
-                println!(
-                    "✅ Kaynak node tüm blockchain chunk'larını aynı TCP oturumunda gönderdi."
-                );
-
                 break;
             }
         }
+
+        println!(
+            "✅ Çoklu chunk sunumu tamamlandı. Toplam chunk: {}",
+            served_chunk_count
+        );
 
         return;
     }
 
     if arguments.len() >= 3
-        && arguments[1] == "sync-request"
+        && arguments[1] == "chunk-sync"
     {
         let peer_address =
             arguments[2].clone();
-
-        let requester_wallet =
-            Wallet::new();
 
         let wallet_password =
             std::env::var(
                 "AION_WALLET_PASSWORD",
             )
             .expect(
-                "Otomatik sync testi için AION_WALLET_PASSWORD tanımlı olmalı",
+                "Çoklu chain sync testi için AION_WALLET_PASSWORD ortam değişkeni tanımlı olmalı",
             );
 
         let (
@@ -306,37 +308,33 @@ async fn main() {
                 sync_consensus,
             );
 
+        let requester_wallet =
+            Wallet::new();
+
         let mut stream =
             TcpTransport::connect_authenticated(
                 &peer_address,
                 &requester_wallet,
-                "127.0.0.1:7004",
+                "127.0.0.1:7005",
             )
             .await
             .expect(
-                "Kalıcı kimliği doğrulanmış sync oturumu kurulamadı",
+                "Çoklu chunk için kimliği doğrulanmış bağlantı kurulamadı",
             );
-
-        println!(
-            "✅ Kalıcı sync TCP oturumu kuruldu: {}",
-            peer_address
-        );
 
         let mut next_start =
             0u64;
 
-        let mut expected_total:
-            Option<u64> =
+        let mut expected_total =
             None;
 
-        let mut chunk_count =
+        let mut received_chunk_count =
             0usize;
 
         loop {
             let request =
                 NetworkMessage::ChainChunkRequest {
-                    start_index:
-                        next_start,
+                    start_index: next_start,
                 };
 
             TcpTransport::send_message(
@@ -345,7 +343,7 @@ async fn main() {
             )
             .await
             .expect(
-                "Kalıcı sync oturumunda ChainChunkRequest gönderilemedi",
+                "Çoklu ChainChunkRequest gönderilemedi",
             );
 
             let response =
@@ -354,7 +352,7 @@ async fn main() {
                 )
                 .await
                 .expect(
-                    "Kalıcı sync oturumunda ChainChunkResponse okunamadı",
+                    "Çoklu ChainChunkResponse okunamadı",
                 );
 
             let (
@@ -384,7 +382,7 @@ async fn main() {
                 != next_start
             {
                 panic!(
-                    "Sync chunk başlangıç indeksi uyuşmuyor. Beklenen: {}, Gelen: {}",
+                    "Chunk başlangıç index uyuşmuyor. Beklenen: {}, Gelen: {}",
                     next_start,
                     start_index
                 );
@@ -392,17 +390,31 @@ async fn main() {
 
             if total_blocks == 0 {
                 panic!(
-                    "Sync toplam blok sayısı sıfır olamaz"
+                    "Toplam blok sayısı sıfır olamaz"
+                );
+            }
+
+            if blocks.is_empty() {
+                panic!(
+                    "Tamamlanmamış senkronizasyonda boş chunk geldi"
+                );
+            }
+
+            if blocks.len()
+                > MAX_SYNC_BLOCKS_PER_MESSAGE
+            {
+                panic!(
+                    "Gelen chunk protokol limitini aşıyor"
                 );
             }
 
             match expected_total {
-                Some(expected)
-                    if expected
+                Some(current_total)
+                    if current_total
                         != total_blocks =>
                 {
                     panic!(
-                        "Sync sırasında toplam blok sayısı değişti"
+                        "Senkronizasyon sırasında toplam blok sayısı değişti"
                     );
                 }
 
@@ -416,40 +428,11 @@ async fn main() {
                 _ => {}
             }
 
-            if blocks.is_empty() {
-                panic!(
-                    "Beklenmeyen boş blockchain chunk'ı"
-                );
-            }
-
-            if blocks.len()
-                > MAX_SYNC_BLOCKS_PER_MESSAGE
-            {
-                panic!(
-                    "Gelen blockchain chunk limiti aşıyor"
-                );
-            }
-
-            if blocks
-                .first()
-                .map(
-                    |block| {
-                        block.index
-                            == start_index
-                    },
-                )
-                != Some(true)
-            {
-                panic!(
-                    "Gelen chunk ilk block indexi geçersiz"
-                );
-            }
-
-            chunk_count += 1;
+            received_chunk_count += 1;
 
             println!(
-                "📦 Sync chunk #{} aynı TCP oturumunda alındı. Başlangıç: {} Blok: {} Toplam: {}",
-                chunk_count,
+                "📦 Chunk #{} alındı. Başlangıç: {} Blok: {} Toplam: {}",
+                received_chunk_count,
                 start_index,
                 blocks.len(),
                 total_blocks
@@ -463,13 +446,13 @@ async fn main() {
                         blocks,
                     )
                     .expect(
-                        "Gelen blockchain chunk Node doğrulamasından geçemedi",
+                        "Gelen çoklu blockchain chunk Node doğrulamasından geçemedi",
                     );
 
             match next_chunk {
                 Some(next_index) => {
                     println!(
-                        "➡️ Aynı TCP oturumunda sonraki chunk isteniyor: {}",
+                        "➡️ Sonraki chunk otomatik istenecek: {}",
                         next_index
                     );
 
@@ -478,46 +461,44 @@ async fn main() {
                 }
 
                 None => {
-                    let final_total =
-                        expected_total
-                            .expect(
-                                "Sync toplam blok sayısı belirlenmedi",
-                            );
-
-                    let synchronized =
-                        sync_node
-                            .blockchain
-                            .chain
-                            .len()
-                            == final_total
-                                as usize;
-
-                    println!(
-                        "✅ Kalıcı TCP oturumunda blockchain senkronizasyonu tamamlandı."
-                    );
-
-                    println!(
-                        "✅ Toplam alınan chunk: {}",
-                        chunk_count
-                    );
-
-                    println!(
-                        "✅ Senkronize zincir blok sayısı: {}",
-                        sync_node
-                            .blockchain
-                            .chain
-                            .len()
-                    );
-
-                    println!(
-                        "✅ Kaynak ve hedef zincir uzunluğu eşit mi: {}",
-                        synchronized
-                    );
-
                     break;
                 }
             }
         }
+
+        let total_blocks =
+            expected_total
+                .expect(
+                    "Senkronizasyon toplam blok bilgisi alınamadı",
+                );
+
+        let synchronized =
+            sync_node
+                .blockchain
+                .chain
+                .len()
+                == total_blocks
+                    as usize;
+
+        println!(
+            "✅ Çoklu chunk senkronizasyonu tamamlandı. Alınan chunk: {}",
+            received_chunk_count
+        );
+
+        println!(
+            "✅ Senkronize zincir blok sayısı: {}",
+            sync_node
+                .blockchain
+                .chain
+                .len()
+        );
+
+        println!(
+            "✅ Aynı TCP oturumunda otomatik çoklu chunk sync başarılı mı: {}",
+            synchronized
+                && received_chunk_count
+                    > 1
+        );
 
         return;
     }
