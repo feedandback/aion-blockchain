@@ -1170,6 +1170,19 @@ impl Node {
     // CHAIN SYNC
     // ==========================
 
+    pub fn apply_chain_chunk(
+        &mut self,
+        start_index: u64,
+        total_blocks: u64,
+        blocks: Vec<Block>,
+    ) -> Result<Option<u64>, String> {
+        self.accept_chain_chunk(
+            start_index,
+            total_blocks,
+            blocks,
+        )
+    }
+
     fn accept_chain_chunk(
         &mut self,
         start_index: u64,

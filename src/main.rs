@@ -1,3 +1,6 @@
+
+
+
 mod chain;
 mod consensus;
 mod core;
@@ -232,6 +235,180 @@ async fn main() {
         println!(
             "✅ Diskteki gerçek blockchain TCP üzerinden alındı mı: {}",
             valid_response
+        );
+
+        if !valid_response {
+            panic!(
+                "Gelen ChainChunkResponse temel doğrulamayı geçemedi"
+            );
+        }
+
+        let (
+            start_index,
+            total_blocks,
+            blocks,
+        ) =
+            match response {
+                NetworkMessage::ChainChunkResponse {
+                    start_index,
+                    total_blocks,
+                    blocks,
+                } => (
+                    start_index,
+                    total_blocks,
+                    blocks,
+                ),
+
+                _ => {
+                    unreachable!(
+                        "Response daha önce ChainChunkResponse olarak doğrulandı"
+                    );
+                }
+            };
+
+        let wallet_password =
+            std::env::var(
+                "AION_WALLET_PASSWORD",
+            )
+            .expect(
+                "Chain sync uygulama testi için AION_WALLET_PASSWORD ortam değişkeni tanımlı olmalı",
+            );
+
+        let (
+            alice_private_key,
+            bob_private_key,
+        ) =
+            Storage::load_wallet_private_keys(
+                &wallet_password,
+            )
+            .expect(
+                "Yerel wallet anahtarları yüklenemedi",
+            )
+            .expect(
+                "Yerel wallet dosyası bulunamadı",
+            );
+
+        let alice_wallet =
+            Wallet::from_private_key_hex(
+                &alice_private_key,
+            )
+            .expect(
+                "Yerel Alice private key geçersiz",
+            );
+
+        let bob_wallet =
+            Wallet::from_private_key_hex(
+                &bob_private_key,
+            )
+            .expect(
+                "Yerel Bob private key geçersiz",
+            );
+
+        let genesis_supply =
+            1000 * 1_000_000;
+
+        let mut sync_consensus =
+            Consensus::new();
+
+        sync_consensus.add_validator(
+            alice_wallet
+                .address()
+                .to_string(),
+            700,
+        );
+
+        sync_consensus.add_validator(
+            bob_wallet
+                .address()
+                .to_string(),
+            300,
+        );
+
+        let mut sync_state =
+            State::new();
+
+        sync_state.create_account(
+            alice_wallet
+                .address()
+                .to_string(),
+            genesis_supply,
+        );
+
+        sync_state.create_account(
+            bob_wallet
+                .address()
+                .to_string(),
+            0,
+        );
+
+        let sync_genesis =
+            Block::new(
+                0,
+                1754690000,
+                String::from("0"),
+                String::from("GENESIS"),
+                String::new(),
+                Vec::new(),
+            );
+
+        let mut sync_blockchain =
+            Blockchain::new(
+                sync_genesis,
+            );
+
+        sync_blockchain
+            .economy
+            .mint(
+                genesis_supply,
+            )
+            .expect(
+                "Sync genesis arzı oluşturulamadı",
+            );
+
+        let mut sync_node =
+            Node::new(
+                sync_blockchain,
+                sync_state,
+                sync_consensus,
+            );
+
+        let next_chunk =
+            sync_node
+                .apply_chain_chunk(
+                    start_index,
+                    total_blocks,
+                    blocks,
+                )
+                .expect(
+                    "Gelen blockchain chunk Node doğrulamasından geçemedi",
+                );
+
+        println!(
+            "✅ Gelen blockchain Node doğrulamasından geçti."
+        );
+
+        println!(
+            "✅ Senkronize yerel zincir blok sayısı: {}",
+            sync_node
+                .blockchain
+                .chain
+                .len()
+        );
+
+        println!(
+            "✅ Sonraki chunk gerekli mi: {}",
+            next_chunk.is_some()
+        );
+
+        println!(
+            "✅ Blockchain doğrulandı ve kalıcı kayda uygulandı mı: {}",
+            next_chunk.is_none()
+                && sync_node
+                    .blockchain
+                    .chain
+                    .len()
+                    == total_blocks
+                        as usize
         );
 
         return;
