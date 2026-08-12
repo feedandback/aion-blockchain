@@ -96,6 +96,46 @@ async fn main() {
 
     if arguments.len() >= 3
         && arguments[1]
+            == "send-wrong-version"
+    {
+        let peer_address =
+            arguments[2].clone();
+
+        let wrong_version_handshake =
+            NetworkMessage::Handshake {
+                node_id:
+                    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                listen_address:
+                    "127.0.0.1:7004"
+                        .to_string(),
+                network_id:
+                    crate::protocol::NETWORK_ID
+                        .to_string(),
+                protocol_version:
+                    Network::protocol_version()
+                        + 1,
+            };
+
+        TcpTransport::send_to(
+            &peer_address,
+            &wrong_version_handshake,
+        )
+        .await
+        .expect(
+            "Yanlış protokol sürümü handshake gönderilemedi",
+        );
+
+        println!(
+            "✅ Yanlış protokol sürümü handshake test mesajı gönderildi: {}",
+            peer_address
+        );
+
+        return;
+    }
+
+    if arguments.len() >= 3
+        && arguments[1]
             == "send-wrong-network"
     {
         let peer_address =
