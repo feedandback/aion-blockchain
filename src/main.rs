@@ -95,6 +95,45 @@ async fn main() {
     }
 
     if arguments.len() >= 3
+        && arguments[1]
+            == "send-wrong-network"
+    {
+        let peer_address =
+            arguments[2].clone();
+
+        let wrong_handshake =
+            NetworkMessage::Handshake {
+                node_id:
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        .to_string(),
+                listen_address:
+                    "127.0.0.1:7003"
+                        .to_string(),
+                network_id:
+                    "wrong-aion-network"
+                        .to_string(),
+                protocol_version:
+                    Network::protocol_version(),
+            };
+
+        TcpTransport::send_to(
+            &peer_address,
+            &wrong_handshake,
+        )
+        .await
+        .expect(
+            "Yanlış network handshake gönderilemedi",
+        );
+
+        println!(
+            "✅ Yanlış Network ID handshake test mesajı gönderildi: {}",
+            peer_address
+        );
+
+        return;
+    }
+
+    if arguments.len() >= 3
         && arguments[1] == "send"
     {
         let peer_address =

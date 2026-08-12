@@ -18,9 +18,9 @@ use crate::protocol::{
     MAX_NETWORK_PEERS,
     MAX_PEER_ADDRESS_LENGTH,
     MAX_SYNC_BLOCKS_PER_MESSAGE,
+    NETWORK_ID,
+    NETWORK_PROTOCOL_VERSION,
 };
-
-const NETWORK_PROTOCOL_VERSION: u32 = 1;
 
 #[allow(dead_code)]
 #[derive(
@@ -33,11 +33,13 @@ pub enum NetworkMessage {
     Handshake {
         node_id: String,
         listen_address: String,
+        network_id: String,
         protocol_version: u32,
     },
 
     HandshakeAck {
         node_id: String,
+        network_id: String,
         protocol_version: u32,
         accepted: bool,
     },
@@ -109,6 +111,8 @@ impl Network {
         NetworkMessage::Handshake {
             node_id,
             listen_address,
+            network_id:
+                NETWORK_ID.to_string(),
             protocol_version:
                 NETWORK_PROTOCOL_VERSION,
         }
@@ -120,6 +124,8 @@ impl Network {
     ) -> NetworkMessage {
         NetworkMessage::HandshakeAck {
             node_id,
+            network_id:
+                NETWORK_ID.to_string(),
             protocol_version:
                 NETWORK_PROTOCOL_VERSION,
             accepted,
@@ -155,6 +161,7 @@ impl Network {
     fn handshake_fields_valid(
         node_id: &str,
         listen_address: &str,
+        network_id: &str,
         protocol_version: u32,
     ) -> bool {
         is_fixed_hex(
@@ -164,18 +171,23 @@ impl Network {
             && !listen_address.is_empty()
             && listen_address.len()
                 <= MAX_PEER_ADDRESS_LENGTH
+            && network_id
+                == NETWORK_ID
             && protocol_version
                 == NETWORK_PROTOCOL_VERSION
     }
 
     fn handshake_ack_fields_valid(
         node_id: &str,
+        network_id: &str,
         protocol_version: u32,
     ) -> bool {
         is_fixed_hex(
             node_id,
             ADDRESS_HEX_LENGTH,
         )
+            && network_id
+                == NETWORK_ID
             && protocol_version
                 == NETWORK_PROTOCOL_VERSION
     }
@@ -203,22 +215,26 @@ impl Network {
             NetworkMessage::Handshake {
                 node_id,
                 listen_address,
+                network_id,
                 protocol_version,
             } => {
                 Self::handshake_fields_valid(
                     node_id,
                     listen_address,
+                    network_id,
                     *protocol_version,
                 )
             }
 
             NetworkMessage::HandshakeAck {
                 node_id,
+                network_id,
                 protocol_version,
                 ..
             } => {
                 Self::handshake_ack_fields_valid(
                     node_id,
+                    network_id,
                     *protocol_version,
                 )
             }
@@ -246,24 +262,28 @@ impl Network {
             NetworkMessage::Handshake {
                 node_id,
                 listen_address,
+                network_id,
                 protocol_version,
             } => {
                 println!(
-                    "📡 Network mesajı yayınlandı: Handshake node={} address={} protocol={}",
+                    "📡 Network mesajı yayınlandı: Handshake node={} address={} network={} protocol={}",
                     node_id,
                     listen_address,
+                    network_id,
                     protocol_version
                 );
             }
 
             NetworkMessage::HandshakeAck {
                 node_id,
+                network_id,
                 protocol_version,
                 accepted,
             } => {
                 println!(
-                    "📡 Network mesajı yayınlandı: HandshakeAck node={} protocol={} accepted={}",
+                    "📡 Network mesajı yayınlandı: HandshakeAck node={} network={} protocol={} accepted={}",
                     node_id,
+                    network_id,
                     protocol_version,
                     accepted
                 );
@@ -353,6 +373,7 @@ impl Network {
         if !Self::handshake_fields_valid(
             &node_id,
             &listen_address,
+            NETWORK_ID,
             NETWORK_PROTOCOL_VERSION,
         ) {
             return false;
@@ -476,6 +497,7 @@ impl Network {
             NetworkMessage::Handshake {
                 node_id,
                 listen_address,
+                network_id,
                 protocol_version,
             } => {
                 let registered =
@@ -485,8 +507,9 @@ impl Network {
                     );
 
                 println!(
-                    "📥 Handshake alındı. Node: {} Protocol: {} Kayıt: {}",
+                    "📥 Handshake alındı. Node: {} Network: {} Protocol: {} Kayıt: {}",
                     node_id,
+                    network_id,
                     protocol_version,
                     registered
                 );
@@ -494,12 +517,14 @@ impl Network {
 
             NetworkMessage::HandshakeAck {
                 node_id,
+                network_id,
                 protocol_version,
                 accepted,
             } => {
                 println!(
-                    "📥 Handshake ACK alındı. Node: {} Protocol: {} Kabul: {}",
+                    "📥 Handshake ACK alındı. Node: {} Network: {} Protocol: {} Kabul: {}",
                     node_id,
+                    network_id,
                     protocol_version,
                     accepted
                 );

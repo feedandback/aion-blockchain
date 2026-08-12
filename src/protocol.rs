@@ -13,6 +13,15 @@ pub const MAX_NETWORK_MESSAGE_HISTORY: usize = 10_000;
 pub const MAX_NETWORK_INBOX_MESSAGES: usize = 10_000;
 pub const MAX_PEER_ADDRESS_LENGTH: usize = 256;
 
+// AION ağ kimliği.
+// Farklı network_id kullanan node'lar birbirine bağlanmamalıdır.
+#[allow(dead_code)]
+pub const NETWORK_ID: &str = "aion-mainnet-v1";
+
+// P2P mesaj protokolü sürümü.
+#[allow(dead_code)]
+pub const NETWORK_PROTOCOL_VERSION: u32 = 1;
+
 // TCP üzerinden tek bir mesaj en fazla 8 MiB olabilir.
 // Block sayısı sınırından bağımsız ek DoS korumasıdır.
 pub const MAX_NETWORK_MESSAGE_BYTES: usize =

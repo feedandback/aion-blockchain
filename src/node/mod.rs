@@ -438,31 +438,19 @@ impl Node {
         message: NetworkMessage,
     ) {
         match message {
-            NetworkMessage::Handshake {
-                node_id,
-                listen_address,
-                protocol_version,
+            message @ NetworkMessage::Handshake {
+                ..
             } => {
                 self.network.receive(
-                    NetworkMessage::Handshake {
-                        node_id,
-                        listen_address,
-                        protocol_version,
-                    },
+                    message,
                 );
             }
 
-            NetworkMessage::HandshakeAck {
-                node_id,
-                protocol_version,
-                accepted,
+            message @ NetworkMessage::HandshakeAck {
+                ..
             } => {
                 self.network.receive(
-                    NetworkMessage::HandshakeAck {
-                        node_id,
-                        protocol_version,
-                        accepted,
-                    },
+                    message,
                 );
             }
 
