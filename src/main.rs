@@ -15,6 +15,7 @@ use crate::core::{Block, Transaction};
 use crate::network::tcp::TcpTransport;
 use crate::network::{Network, NetworkMessage};
 use crate::node::Node;
+use crate::protocol::MAX_SYNC_BLOCKS_PER_MESSAGE;
 use crate::state::State;
 use crate::storage::Storage;
 use crate::wallet::Wallet;
@@ -87,11 +88,60 @@ async fn main() {
                 }
             };
 
+        let stored_chain =
+            Storage::load_blockchain()
+                .expect(
+                    "Diskteki blockchain okunamadı",
+                )
+                .expect(
+                    "Diskte blockchain bulunamadı. Önce normal node çalıştırılarak blockchain oluşturulmalı.",
+                );
+
+        let total_blocks =
+            u64::try_from(
+                stored_chain.len(),
+            )
+            .expect(
+                "Toplam blok sayısı u64 sınırını aşıyor",
+            );
+
+        let start =
+            usize::try_from(
+                start_index,
+            )
+            .expect(
+                "Chunk başlangıç indeksi usize sınırını aşıyor",
+            );
+
+        let blocks =
+            if start
+                >= stored_chain.len()
+            {
+                Vec::new()
+            } else {
+                let end =
+                    start
+                        .saturating_add(
+                            MAX_SYNC_BLOCKS_PER_MESSAGE,
+                        )
+                        .min(
+                            stored_chain.len(),
+                        );
+
+                stored_chain[
+                    start..end
+                ]
+                    .to_vec()
+            };
+
+        let sent_block_count =
+            blocks.len();
+
         let response =
             NetworkMessage::ChainChunkResponse {
                 start_index,
-                total_blocks: 0,
-                blocks: Vec::new(),
+                total_blocks,
+                blocks,
             };
 
         TcpTransport::send_message(
@@ -104,7 +154,10 @@ async fn main() {
         );
 
         println!(
-            "✅ ChainChunkResponse aynı doğrulanmış TCP bağlantısından gönderildi."
+            "✅ Gerçek ChainChunkResponse gönderildi. Başlangıç: {} Toplam zincir: {} Gönderilen blok: {}",
+            start_index,
+            total_blocks,
+            sent_block_count
         );
 
         return;
@@ -142,17 +195,42 @@ async fn main() {
         );
 
         let valid_response =
-            matches!(
-                response,
+            match &response {
                 NetworkMessage::ChainChunkResponse {
-                    start_index: 0,
-                    total_blocks: 0,
+                    start_index,
+                    total_blocks,
                     blocks,
-                } if blocks.is_empty()
-            );
+                } => {
+                    println!(
+                        "📦 Alınan gerçek blockchain chunk'ı: başlangıç={} toplam_blok={} alınan_blok={}",
+                        start_index,
+                        total_blocks,
+                        blocks.len()
+                    );
+
+                    *start_index == 0
+                        && *total_blocks > 0
+                        && !blocks.is_empty()
+                        && blocks.len()
+                            <= MAX_SYNC_BLOCKS_PER_MESSAGE
+                        && blocks
+                            .first()
+                            .map(
+                                |block| {
+                                    block.index
+                                        == 0
+                                },
+                            )
+                            .unwrap_or(
+                                false,
+                            )
+                }
+
+                _ => false,
+            };
 
         println!(
-            "✅ Aynı TCP bağlantısında chunk request/response başarılı mı: {}",
+            "✅ Diskteki gerçek blockchain TCP üzerinden alındı mı: {}",
             valid_response
         );
 
