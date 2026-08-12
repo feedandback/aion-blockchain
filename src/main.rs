@@ -131,6 +131,32 @@ async fn main() {
             accepted
         );
 
+        if !accepted {
+            return;
+        }
+
+        let session_message =
+            TcpTransport::read_message(
+                &mut stream,
+            )
+            .await
+            .expect(
+                "Handshake sonrası P2P mesajı okunamadı",
+            );
+
+        println!(
+            "✅ Kimliği doğrulanmış P2P oturumunda mesaj alındı: {:?}",
+            session_message
+        );
+
+        test_network.receive(
+            session_message,
+        );
+
+        println!(
+            "✅ Handshake sonrası SyncRequest işlendi."
+        );
+
         return;
     }
 
@@ -404,20 +430,37 @@ async fn main() {
             )
             .to_string();
 
-        let response =
-            TcpTransport::send_and_receive(
+        let mut stream =
+            TcpTransport::connect(
                 &peer_address,
-                &handshake,
             )
             .await
             .expect(
-                "Gerçek TCP handshake veya ACK işlemi başarısız",
+                "Gerçek TCP bağlantısı kurulamadı",
             );
+
+        TcpTransport::send_message(
+            &mut stream,
+            &handshake,
+        )
+        .await
+        .expect(
+            "Gerçek TCP handshake gönderilemedi",
+        );
 
         println!(
             "✅ Handshake gerçek TCP üzerinden gönderildi: {}",
             peer_address
         );
+
+        let response =
+            TcpTransport::read_message(
+                &mut stream,
+            )
+            .await
+            .expect(
+                "HandshakeAck okunamadı",
+            );
 
         println!(
             "✅ Handshake cevabı alındı: {:?}",
@@ -440,6 +483,19 @@ async fn main() {
                 "HandshakeAck geçersiz"
             );
         }
+
+        TcpTransport::send_message(
+            &mut stream,
+            &NetworkMessage::SyncRequest,
+        )
+        .await
+        .expect(
+            "Handshake sonrası SyncRequest gönderilemedi",
+        );
+
+        println!(
+            "✅ Kimliği doğrulanmış P2P oturumunda SyncRequest gönderildi."
+        );
 
         return;
     }
