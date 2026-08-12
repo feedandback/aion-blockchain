@@ -5,6 +5,10 @@ use std::time::{
     UNIX_EPOCH,
 };
 
+use rand_core::{
+    OsRng,
+    RngCore,
+};
 use serde::{
     Deserialize,
     Serialize,
@@ -44,6 +48,7 @@ pub enum NetworkMessage {
         network_id: String,
         protocol_version: u32,
         timestamp: u64,
+        challenge: String,
         signature: String,
     },
 
@@ -53,6 +58,7 @@ pub enum NetworkMessage {
         network_id: String,
         protocol_version: u32,
         timestamp: u64,
+        challenge: String,
         accepted: bool,
         signature: String,
     },
@@ -133,6 +139,37 @@ impl Network {
         ) <= MAX_HANDSHAKE_AGE_SECONDS
     }
 
+    pub fn generate_handshake_challenge(
+    ) -> String {
+        let mut bytes =
+            [0u8; 32];
+
+        OsRng.fill_bytes(
+            &mut bytes,
+        );
+
+        hex::encode(
+            bytes,
+        )
+    }
+
+    pub fn handshake_challenge(
+        message: &NetworkMessage,
+    ) -> Option<&str> {
+        match message {
+            NetworkMessage::Handshake {
+                challenge,
+                ..
+            } => {
+                Some(
+                    challenge,
+                )
+            }
+
+            _ => None,
+        }
+    }
+
     pub fn protocol_version(
     ) -> u32 {
         NETWORK_PROTOCOL_VERSION
@@ -154,6 +191,9 @@ impl Network {
         let timestamp =
             Self::current_timestamp();
 
+        let challenge =
+            Self::generate_handshake_challenge();
+
         let signature =
             wallet
                 .sign_node_handshake(
@@ -161,6 +201,7 @@ impl Network {
                     NETWORK_ID,
                     NETWORK_PROTOCOL_VERSION,
                     timestamp,
+                    &challenge,
                 );
 
         NetworkMessage::Handshake {
@@ -172,6 +213,7 @@ impl Network {
             protocol_version:
                 NETWORK_PROTOCOL_VERSION,
             timestamp,
+            challenge,
             signature,
         }
     }
@@ -179,6 +221,7 @@ impl Network {
     pub fn create_handshake_ack(
         wallet: &Wallet,
         accepted: bool,
+        challenge: String,
     ) -> NetworkMessage {
         let node_id =
             wallet
@@ -194,11 +237,12 @@ impl Network {
 
         let signature =
             wallet
-                .sign_node_handshake(
-                    "HANDSHAKE_ACK",
+                .sign_node_handshake_ack(
                     NETWORK_ID,
                     NETWORK_PROTOCOL_VERSION,
                     timestamp,
+                    &challenge,
+                    accepted,
                 );
 
         NetworkMessage::HandshakeAck {
@@ -209,6 +253,7 @@ impl Network {
             protocol_version:
                 NETWORK_PROTOCOL_VERSION,
             timestamp,
+            challenge,
             accepted,
             signature,
         }
@@ -216,6 +261,7 @@ impl Network {
 
     pub fn validate_handshake_ack(
         message: &NetworkMessage,
+        expected_challenge: &str,
     ) -> bool {
         match message {
             NetworkMessage::HandshakeAck {
@@ -224,10 +270,13 @@ impl Network {
                 network_id,
                 protocol_version,
                 timestamp,
+                challenge,
                 accepted,
                 signature,
             } => {
                 *accepted
+                    && challenge
+                        == expected_challenge
                     && Self::handshake_ack_fields_valid(
                         node_id,
                         network_id,
@@ -236,13 +285,14 @@ impl Network {
                     && Self::handshake_timestamp_valid(
                         *timestamp,
                     )
-                    && Wallet::verify_node_handshake(
+                    && Wallet::verify_node_handshake_ack(
                         node_id,
                         public_key,
-                        "HANDSHAKE_ACK",
                         network_id,
                         *protocol_version,
                         *timestamp,
+                        challenge,
+                        *accepted,
                         signature,
                     )
             }
@@ -284,6 +334,7 @@ impl Network {
         network_id: &str,
         protocol_version: u32,
         timestamp: u64,
+        challenge: &str,
         signature: &str,
     ) -> bool {
         is_fixed_hex(
@@ -304,6 +355,10 @@ impl Network {
             && Self::handshake_timestamp_valid(
                 timestamp,
             )
+            && is_fixed_hex(
+                challenge,
+                64,
+            )
             && Wallet::verify_node_handshake(
                 node_id,
                 public_key,
@@ -311,6 +366,7 @@ impl Network {
                 network_id,
                 protocol_version,
                 timestamp,
+                challenge,
                 signature,
             )
     }
@@ -357,6 +413,7 @@ impl Network {
                 network_id,
                 protocol_version,
                 timestamp,
+                challenge,
                 signature,
             } => {
                 Self::handshake_fields_valid(
@@ -366,6 +423,7 @@ impl Network {
                     network_id,
                     *protocol_version,
                     *timestamp,
+                    challenge,
                     signature,
                 )
             }
@@ -374,6 +432,7 @@ impl Network {
                 node_id,
                 network_id,
                 protocol_version,
+                challenge,
                 ..
             } => {
                 Self::handshake_ack_fields_valid(
@@ -381,6 +440,10 @@ impl Network {
                     network_id,
                     *protocol_version,
                 )
+                    && is_fixed_hex(
+                        challenge,
+                        64,
+                    )
             }
 
             NetworkMessage::ChainChunkResponse {

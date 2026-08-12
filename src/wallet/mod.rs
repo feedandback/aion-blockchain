@@ -139,15 +139,17 @@ impl Wallet {
         network_id: &str,
         protocol_version: u32,
         timestamp: u64,
+        challenge: &str,
     ) -> Vec<u8> {
         format!(
-            "AION_P2P_HANDSHAKE_V1\nnode_id={}\npublic_key={}\nlisten_address={}\nnetwork_id={}\nprotocol_version={}\ntimestamp={}",
+            "AION_P2P_HANDSHAKE_V1\nnode_id={}\npublic_key={}\nlisten_address={}\nnetwork_id={}\nprotocol_version={}\ntimestamp={}\nchallenge={}",
             node_id,
             public_key_hex,
             listen_address,
             network_id,
             protocol_version,
-            timestamp
+            timestamp,
+            challenge
         )
         .into_bytes()
     }
@@ -158,6 +160,7 @@ impl Wallet {
         network_id: &str,
         protocol_version: u32,
         timestamp: u64,
+        challenge: &str,
     ) -> String {
         let public_key_hex =
             self.public_key_hex();
@@ -170,6 +173,7 @@ impl Wallet {
                 network_id,
                 protocol_version,
                 timestamp,
+                challenge,
             );
 
         self.sign(
@@ -184,6 +188,7 @@ impl Wallet {
         network_id: &str,
         protocol_version: u32,
         timestamp: u64,
+        challenge: &str,
         signature_hex: &str,
     ) -> bool {
         let derived_node_id =
@@ -210,6 +215,100 @@ impl Wallet {
                 network_id,
                 protocol_version,
                 timestamp,
+                challenge,
+            );
+
+        Self::verify(
+            public_key_hex,
+            &message,
+            signature_hex,
+        )
+    }
+
+    pub fn node_handshake_ack_message(
+        node_id: &str,
+        public_key_hex: &str,
+        network_id: &str,
+        protocol_version: u32,
+        timestamp: u64,
+        challenge: &str,
+        accepted: bool,
+    ) -> Vec<u8> {
+        format!(
+            "AION_P2P_HANDSHAKE_ACK_V1\nnode_id={}\npublic_key={}\nnetwork_id={}\nprotocol_version={}\ntimestamp={}\nchallenge={}\naccepted={}",
+            node_id,
+            public_key_hex,
+            network_id,
+            protocol_version,
+            timestamp,
+            challenge,
+            accepted
+        )
+        .into_bytes()
+    }
+
+    pub fn sign_node_handshake_ack(
+        &self,
+        network_id: &str,
+        protocol_version: u32,
+        timestamp: u64,
+        challenge: &str,
+        accepted: bool,
+    ) -> String {
+        let public_key_hex =
+            self.public_key_hex();
+
+        let message =
+            Self::node_handshake_ack_message(
+                self.node_id(),
+                &public_key_hex,
+                network_id,
+                protocol_version,
+                timestamp,
+                challenge,
+                accepted,
+            );
+
+        self.sign(
+            &message,
+        )
+    }
+
+    pub fn verify_node_handshake_ack(
+        node_id: &str,
+        public_key_hex: &str,
+        network_id: &str,
+        protocol_version: u32,
+        timestamp: u64,
+        challenge: &str,
+        accepted: bool,
+        signature_hex: &str,
+    ) -> bool {
+        let derived_node_id =
+            match Self::address_from_public_key(
+                public_key_hex,
+            ) {
+                Some(address) => address,
+                None => {
+                    return false;
+                }
+            };
+
+        if derived_node_id
+            != node_id
+        {
+            return false;
+        }
+
+        let message =
+            Self::node_handshake_ack_message(
+                node_id,
+                public_key_hex,
+                network_id,
+                protocol_version,
+                timestamp,
+                challenge,
+                accepted,
             );
 
         Self::verify(

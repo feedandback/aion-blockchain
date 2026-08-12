@@ -82,6 +82,13 @@ async fn main() {
             peer_address
         );
 
+        let handshake_challenge =
+            Network::handshake_challenge(
+                &message,
+            )
+            .unwrap_or("")
+            .to_string();
+
         let mut test_network =
             Network::new();
 
@@ -107,6 +114,7 @@ async fn main() {
             Network::create_handshake_ack(
                 &listener_wallet,
                 accepted,
+                handshake_challenge,
             );
 
         TcpTransport::send_message(
@@ -154,6 +162,9 @@ async fn main() {
             test_wallet
                 .public_key_hex();
 
+        let challenge =
+            Network::generate_handshake_challenge();
+
         let signature =
             test_wallet
                 .sign_node_handshake(
@@ -161,6 +172,7 @@ async fn main() {
                     crate::protocol::NETWORK_ID,
                     protocol_version,
                     timestamp,
+                    &challenge,
                 );
 
         let stale_handshake =
@@ -176,6 +188,7 @@ async fn main() {
                         .to_string(),
                 protocol_version,
                 timestamp,
+                challenge,
                 signature,
             };
 
@@ -245,6 +258,9 @@ async fn main() {
         let timestamp =
             Network::current_timestamp();
 
+        let challenge =
+            Network::generate_handshake_challenge();
+
         let signature =
             test_wallet
                 .sign_node_handshake(
@@ -252,6 +268,7 @@ async fn main() {
                     crate::protocol::NETWORK_ID,
                     protocol_version,
                     timestamp,
+                    &challenge,
                 );
 
         let wrong_version_handshake =
@@ -267,6 +284,7 @@ async fn main() {
                         .to_string(),
                 protocol_version,
                 timestamp,
+                challenge,
                 signature,
             };
 
@@ -315,6 +333,9 @@ async fn main() {
         let timestamp =
             Network::current_timestamp();
 
+        let challenge =
+            Network::generate_handshake_challenge();
+
         let signature =
             test_wallet
                 .sign_node_handshake(
@@ -322,6 +343,7 @@ async fn main() {
                     &wrong_network_id,
                     protocol_version,
                     timestamp,
+                    &challenge,
                 );
 
         let wrong_handshake =
@@ -336,6 +358,7 @@ async fn main() {
                     wrong_network_id,
                 protocol_version,
                 timestamp,
+                challenge,
                 signature,
             };
 
@@ -372,6 +395,15 @@ async fn main() {
                     .to_string(),
             );
 
+        let expected_challenge =
+            Network::handshake_challenge(
+                &handshake,
+            )
+            .expect(
+                "Handshake challenge oluşturulamadı",
+            )
+            .to_string();
+
         let response =
             TcpTransport::send_and_receive(
                 &peer_address,
@@ -395,6 +427,7 @@ async fn main() {
         let handshake_ack_valid =
             Network::validate_handshake_ack(
                 &response,
+                &expected_challenge,
             );
 
         println!(
@@ -591,6 +624,9 @@ async fn main() {
     let node_identity_timestamp =
         Network::current_timestamp();
 
+    let node_identity_challenge =
+        Network::generate_handshake_challenge();
+
     let node_identity_signature =
         alice_wallet
             .sign_node_handshake(
@@ -598,6 +634,7 @@ async fn main() {
                 crate::protocol::NETWORK_ID,
                 Network::protocol_version(),
                 node_identity_timestamp,
+                &node_identity_challenge,
             );
 
     let signed_node_identity_ok =
@@ -608,6 +645,7 @@ async fn main() {
             crate::protocol::NETWORK_ID,
             Network::protocol_version(),
             node_identity_timestamp,
+            &node_identity_challenge,
             &node_identity_signature,
         );
 
