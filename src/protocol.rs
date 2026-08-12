@@ -22,6 +22,11 @@ pub const NETWORK_ID: &str = "aion-mainnet-v1";
 #[allow(dead_code)]
 pub const NETWORK_PROTOCOL_VERSION: u32 = 1;
 
+// TCP bağlantı ve mesaj okuma/yazma işlemleri
+// sonsuza kadar bekleyemez.
+pub const NETWORK_CONNECT_TIMEOUT_SECONDS: u64 = 5;
+pub const NETWORK_IO_TIMEOUT_SECONDS: u64 = 10;
+
 // TCP üzerinden tek bir mesaj en fazla 8 MiB olabilir.
 // Block sayısı sınırından bağımsız ek DoS korumasıdır.
 pub const MAX_NETWORK_MESSAGE_BYTES: usize =

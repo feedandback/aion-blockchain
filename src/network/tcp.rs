@@ -6,10 +6,17 @@ use tokio::net::{
     TcpListener,
     TcpStream,
 };
+use std::time::Duration;
+
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 
 use crate::network::NetworkMessage;
-use crate::protocol::MAX_NETWORK_MESSAGE_BYTES;
+use crate::protocol::{
+    MAX_NETWORK_MESSAGE_BYTES,
+    NETWORK_CONNECT_TIMEOUT_SECONDS,
+    NETWORK_IO_TIMEOUT_SECONDS,
+};
 
 pub struct TcpTransport;
 
@@ -35,10 +42,23 @@ impl TcpTransport {
     pub async fn connect(
         address: &str,
     ) -> Result<TcpStream, String> {
-        TcpStream::connect(
-            address,
+        timeout(
+            Duration::from_secs(
+                NETWORK_CONNECT_TIMEOUT_SECONDS,
+            ),
+            TcpStream::connect(
+                address,
+            ),
         )
         .await
+        .map_err(
+            |_| {
+                format!(
+                    "Peer bağlantısı zaman aşımına uğradı: {} saniye",
+                    NETWORK_CONNECT_TIMEOUT_SECONDS
+                )
+            },
+        )?
         .map_err(
             |error| {
                 format!(
@@ -118,46 +138,76 @@ impl TcpTransport {
                 },
             )?;
 
-        stream
-            .write_all(
+        timeout(
+            Duration::from_secs(
+                NETWORK_IO_TIMEOUT_SECONDS,
+            ),
+            stream.write_all(
                 &payload_length
                     .to_be_bytes(),
-            )
-            .await
-            .map_err(
-                |error| {
-                    format!(
-                        "Network mesaj başlığı gönderilemedi: {}",
-                        error
-                    )
-                },
-            )?;
+            ),
+        )
+        .await
+        .map_err(
+            |_| {
+                "Network mesaj başlığı gönderimi zaman aşımına uğradı"
+                    .to_string()
+            },
+        )?
+        .map_err(
+            |error| {
+                format!(
+                    "Network mesaj başlığı gönderilemedi: {}",
+                    error
+                )
+            },
+        )?;
 
-        stream
-            .write_all(
+        timeout(
+            Duration::from_secs(
+                NETWORK_IO_TIMEOUT_SECONDS,
+            ),
+            stream.write_all(
                 &payload,
-            )
-            .await
-            .map_err(
-                |error| {
-                    format!(
-                        "Network mesajı gönderilemedi: {}",
-                        error
-                    )
-                },
-            )?;
+            ),
+        )
+        .await
+        .map_err(
+            |_| {
+                "Network mesajı gönderimi zaman aşımına uğradı"
+                    .to_string()
+            },
+        )?
+        .map_err(
+            |error| {
+                format!(
+                    "Network mesajı gönderilemedi: {}",
+                    error
+                )
+            },
+        )?;
 
-        stream
-            .flush()
-            .await
-            .map_err(
-                |error| {
-                    format!(
-                        "Network mesajı flush edilemedi: {}",
-                        error
-                    )
-                },
-            )?;
+        timeout(
+            Duration::from_secs(
+                NETWORK_IO_TIMEOUT_SECONDS,
+            ),
+            stream.flush(),
+        )
+        .await
+        .map_err(
+            |_| {
+                "Network mesaj flush işlemi zaman aşımına uğradı"
+                    .to_string()
+            },
+        )?
+        .map_err(
+            |error| {
+                format!(
+                    "Network mesajı flush edilemedi: {}",
+                    error
+                )
+            },
+        )?;
 
         Ok(())
     }
@@ -168,19 +218,29 @@ impl TcpTransport {
         let mut length_bytes =
             [0u8; 4];
 
-        stream
-            .read_exact(
+        timeout(
+            Duration::from_secs(
+                NETWORK_IO_TIMEOUT_SECONDS,
+            ),
+            stream.read_exact(
                 &mut length_bytes,
-            )
-            .await
-            .map_err(
-                |error| {
-                    format!(
-                        "Network mesaj başlığı okunamadı: {}",
-                        error
-                    )
-                },
-            )?;
+            ),
+        )
+        .await
+        .map_err(
+            |_| {
+                "Network mesaj başlığı okuma zaman aşımına uğradı"
+                    .to_string()
+            },
+        )?
+        .map_err(
+            |error| {
+                format!(
+                    "Network mesaj başlığı okunamadı: {}",
+                    error
+                )
+            },
+        )?;
 
         let payload_length =
             u32::from_be_bytes(
@@ -209,19 +269,29 @@ impl TcpTransport {
                 payload_length
             ];
 
-        stream
-            .read_exact(
+        timeout(
+            Duration::from_secs(
+                NETWORK_IO_TIMEOUT_SECONDS,
+            ),
+            stream.read_exact(
                 &mut payload,
-            )
-            .await
-            .map_err(
-                |error| {
-                    format!(
-                        "Network mesajı okunamadı: {}",
-                        error
-                    )
-                },
-            )?;
+            ),
+        )
+        .await
+        .map_err(
+            |_| {
+                "Network mesajı okuma zaman aşımına uğradı"
+                    .to_string()
+            },
+        )?
+        .map_err(
+            |error| {
+                format!(
+                    "Network mesajı okunamadı: {}",
+                    error
+                )
+            },
+        )?;
 
         serde_json::from_slice(
             &payload,
