@@ -438,6 +438,34 @@ impl Node {
         message: NetworkMessage,
     ) {
         match message {
+            NetworkMessage::Handshake {
+                node_id,
+                listen_address,
+                protocol_version,
+            } => {
+                self.network.receive(
+                    NetworkMessage::Handshake {
+                        node_id,
+                        listen_address,
+                        protocol_version,
+                    },
+                );
+            }
+
+            NetworkMessage::HandshakeAck {
+                node_id,
+                protocol_version,
+                accepted,
+            } => {
+                self.network.receive(
+                    NetworkMessage::HandshakeAck {
+                        node_id,
+                        protocol_version,
+                        accepted,
+                    },
+                );
+            }
+
             NetworkMessage::Transaction(
                 transaction,
             ) => {

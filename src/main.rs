@@ -13,7 +13,7 @@ use crate::chain::Blockchain;
 use crate::consensus::Consensus;
 use crate::core::{Block, Transaction};
 use crate::network::tcp::TcpTransport;
-use crate::network::NetworkMessage;
+use crate::network::{Network, NetworkMessage};
 use crate::node::Node;
 use crate::state::State;
 use crate::storage::Storage;
@@ -74,6 +74,19 @@ async fn main() {
                 "Peer: {}",
                 peer_address
             );
+
+            let mut test_network =
+                Network::new();
+
+            test_network.receive(
+                message,
+            );
+
+            println!(
+                "✅ Tanımlanan peer sayısı: {}",
+                test_network
+                    .identified_peer_count()
+            );
         }
 
         listener_task.abort();
@@ -87,17 +100,25 @@ async fn main() {
         let peer_address =
             arguments[2].clone();
 
+        let handshake =
+            Network::create_handshake(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .to_string(),
+                "127.0.0.1:7002"
+                    .to_string(),
+            );
+
         TcpTransport::send_to(
             &peer_address,
-            &NetworkMessage::SyncRequest,
+            &handshake,
         )
         .await
         .expect(
-            "Gerçek TCP mesajı gönderilemedi",
+            "Gerçek TCP handshake gönderilemedi",
         );
 
         println!(
-            "✅ SyncRequest gerçek TCP üzerinden gönderildi: {}",
+            "✅ Handshake gerçek TCP üzerinden gönderildi: {}",
             peer_address
         );
 

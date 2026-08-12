@@ -5,8 +5,13 @@ use serde::{
     Serialize,
 };
 
-use crate::core::{Block, Transaction};
+use crate::core::{
+    Block,
+    Transaction,
+};
 use crate::protocol::{
+    is_fixed_hex,
+    ADDRESS_HEX_LENGTH,
     MAX_NETWORK_INBOX_MESSAGES,
     MAX_NETWORK_MESSAGE_BYTES,
     MAX_NETWORK_MESSAGE_HISTORY,
@@ -14,6 +19,8 @@ use crate::protocol::{
     MAX_PEER_ADDRESS_LENGTH,
     MAX_SYNC_BLOCKS_PER_MESSAGE,
 };
+
+const NETWORK_PROTOCOL_VERSION: u32 = 1;
 
 #[allow(dead_code)]
 #[derive(
@@ -23,6 +30,18 @@ use crate::protocol::{
     Deserialize,
 )]
 pub enum NetworkMessage {
+    Handshake {
+        node_id: String,
+        listen_address: String,
+        protocol_version: u32,
+    },
+
+    HandshakeAck {
+        node_id: String,
+        protocol_version: u32,
+        accepted: bool,
+    },
+
     Transaction(Transaction),
 
     Block(Block),
@@ -40,13 +59,27 @@ pub enum NetworkMessage {
     },
 }
 
+#[derive(
+    Debug,
+    Clone,
+)]
+pub struct PeerIdentity {
+    pub node_id: String,
+    pub listen_address: String,
+}
+
 #[derive(Debug, Default)]
 pub struct Network {
     pub peers: Vec<String>,
 
-    pub messages: Vec<NetworkMessage>,
+    pub peer_identities:
+        Vec<PeerIdentity>,
 
-    pub inbox: Vec<NetworkMessage>,
+    pub messages:
+        Vec<NetworkMessage>,
+
+    pub inbox:
+        Vec<NetworkMessage>,
 }
 
 #[allow(dead_code)]
@@ -55,9 +88,41 @@ impl Network {
         Self {
             peers: Vec::new(),
 
+            peer_identities:
+                Vec::new(),
+
             messages: Vec::new(),
 
             inbox: Vec::new(),
+        }
+    }
+
+    pub fn protocol_version(
+    ) -> u32 {
+        NETWORK_PROTOCOL_VERSION
+    }
+
+    pub fn create_handshake(
+        node_id: String,
+        listen_address: String,
+    ) -> NetworkMessage {
+        NetworkMessage::Handshake {
+            node_id,
+            listen_address,
+            protocol_version:
+                NETWORK_PROTOCOL_VERSION,
+        }
+    }
+
+    pub fn create_handshake_ack(
+        node_id: String,
+        accepted: bool,
+    ) -> NetworkMessage {
+        NetworkMessage::HandshakeAck {
+            node_id,
+            protocol_version:
+                NETWORK_PROTOCOL_VERSION,
+            accepted,
         }
     }
 
@@ -87,6 +152,34 @@ impl Network {
         self.inbox.push(message);
     }
 
+    fn handshake_fields_valid(
+        node_id: &str,
+        listen_address: &str,
+        protocol_version: u32,
+    ) -> bool {
+        is_fixed_hex(
+            node_id,
+            ADDRESS_HEX_LENGTH,
+        )
+            && !listen_address.is_empty()
+            && listen_address.len()
+                <= MAX_PEER_ADDRESS_LENGTH
+            && protocol_version
+                == NETWORK_PROTOCOL_VERSION
+    }
+
+    fn handshake_ack_fields_valid(
+        node_id: &str,
+        protocol_version: u32,
+    ) -> bool {
+        is_fixed_hex(
+            node_id,
+            ADDRESS_HEX_LENGTH,
+        )
+            && protocol_version
+                == NETWORK_PROTOCOL_VERSION
+    }
+
     fn message_within_limits(
         message: &NetworkMessage,
     ) -> bool {
@@ -107,6 +200,29 @@ impl Network {
         }
 
         match message {
+            NetworkMessage::Handshake {
+                node_id,
+                listen_address,
+                protocol_version,
+            } => {
+                Self::handshake_fields_valid(
+                    node_id,
+                    listen_address,
+                    *protocol_version,
+                )
+            }
+
+            NetworkMessage::HandshakeAck {
+                node_id,
+                protocol_version,
+                ..
+            } => {
+                Self::handshake_ack_fields_valid(
+                    node_id,
+                    *protocol_version,
+                )
+            }
+
             NetworkMessage::ChainChunkResponse {
                 blocks,
                 ..
@@ -127,6 +243,32 @@ impl Network {
         message: &NetworkMessage,
     ) {
         match message {
+            NetworkMessage::Handshake {
+                node_id,
+                listen_address,
+                protocol_version,
+            } => {
+                println!(
+                    "📡 Network mesajı yayınlandı: Handshake node={} address={} protocol={}",
+                    node_id,
+                    listen_address,
+                    protocol_version
+                );
+            }
+
+            NetworkMessage::HandshakeAck {
+                node_id,
+                protocol_version,
+                accepted,
+            } => {
+                println!(
+                    "📡 Network mesajı yayınlandı: HandshakeAck node={} protocol={} accepted={}",
+                    node_id,
+                    protocol_version,
+                    accepted
+                );
+            }
+
             NetworkMessage::Transaction(
                 transaction,
             ) => {
@@ -203,10 +345,85 @@ impl Network {
         true
     }
 
+    pub fn add_peer_identity(
+        &mut self,
+        node_id: String,
+        listen_address: String,
+    ) -> bool {
+        if !Self::handshake_fields_valid(
+            &node_id,
+            &listen_address,
+            NETWORK_PROTOCOL_VERSION,
+        ) {
+            return false;
+        }
+
+        if self.peer_identities.len()
+            >= MAX_NETWORK_PEERS
+        {
+            return false;
+        }
+
+        if self
+            .peer_identities
+            .iter()
+            .any(
+                |peer| {
+                    peer.node_id
+                        == node_id
+                        || peer.listen_address
+                            == listen_address
+                },
+            )
+        {
+            return false;
+        }
+
+        if !self.peers.contains(
+            &listen_address,
+        ) {
+            if !self.add_peer(
+                listen_address.clone(),
+            ) {
+                return false;
+            }
+        }
+
+        self.peer_identities.push(
+            PeerIdentity {
+                node_id,
+                listen_address,
+            },
+        );
+
+        true
+    }
+
+    pub fn has_peer_node_id(
+        &self,
+        node_id: &str,
+    ) -> bool {
+        self.peer_identities
+            .iter()
+            .any(
+                |peer| {
+                    peer.node_id
+                        == node_id
+                },
+            )
+    }
+
     pub fn peer_count(
         &self,
     ) -> usize {
         self.peers.len()
+    }
+
+    pub fn identified_peer_count(
+        &self,
+    ) -> usize {
+        self.peer_identities
+            .len()
     }
 
     pub fn broadcast(
@@ -219,7 +436,7 @@ impl Network {
             &message,
         ) {
             println!(
-                "❌ Network mesajı reddedildi: Mesaj boyutu veya sync block limiti aşıldı"
+                "❌ Network mesajı reddedildi: Mesaj boyutu veya protokol limiti aşıldı"
             );
 
             return;
@@ -249,13 +466,45 @@ impl Network {
             &message,
         ) {
             println!(
-                "❌ Network mesajı reddedildi: Mesaj boyutu veya sync block limiti aşıldı"
+                "❌ Network mesajı reddedildi: Mesaj boyutu veya protokol limiti aşıldı"
             );
 
             return;
         }
 
         match &message {
+            NetworkMessage::Handshake {
+                node_id,
+                listen_address,
+                protocol_version,
+            } => {
+                let registered =
+                    self.add_peer_identity(
+                        node_id.clone(),
+                        listen_address.clone(),
+                    );
+
+                println!(
+                    "📥 Handshake alındı. Node: {} Protocol: {} Kayıt: {}",
+                    node_id,
+                    protocol_version,
+                    registered
+                );
+            }
+
+            NetworkMessage::HandshakeAck {
+                node_id,
+                protocol_version,
+                accepted,
+            } => {
+                println!(
+                    "📥 Handshake ACK alındı. Node: {} Protocol: {} Kabul: {}",
+                    node_id,
+                    protocol_version,
+                    accepted
+                );
+            }
+
             NetworkMessage::Transaction(
                 transaction,
             ) => {
