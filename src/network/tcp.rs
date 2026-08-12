@@ -534,7 +534,7 @@ impl TcpTransport {
                         Network::new();
 
                     validation_network.receive(
-                        handshake,
+                        handshake.clone(),
                     );
 
                     let accepted =
@@ -577,6 +577,22 @@ impl TcpTransport {
                         "✅ Kimliği doğrulanmış peer bağlandı: {}",
                         peer_address
                     );
+
+                    if message_sender
+                        .send((
+                            handshake,
+                            peer_address
+                                .clone(),
+                        ))
+                        .await
+                        .is_err()
+                    {
+                        println!(
+                            "❌ Peer kimliği ana node'a aktarılamadı"
+                        );
+
+                        return;
+                    }
 
                     loop {
                         let message =

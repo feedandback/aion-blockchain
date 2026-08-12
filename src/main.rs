@@ -68,10 +68,18 @@ async fn main() {
             listen_address
         );
 
-        let mut received_count =
-            0usize;
+        let mut network =
+            Network::new();
 
-        while received_count < 2 {
+        let mut handshake_received =
+            false;
+
+        let mut sync_received =
+            false;
+
+        while !handshake_received
+            || !sync_received
+        {
             let (
                 message,
                 peer_address,
@@ -84,7 +92,7 @@ async fn main() {
                     );
 
             println!(
-                "✅ Kimliği doğrulanmış peer mesajı: {:?}",
+                "✅ Ana node P2P mesajı aldı: {:?}",
                 message
             );
 
@@ -93,21 +101,50 @@ async fn main() {
                 peer_address
             );
 
-            if matches!(
-                message,
-                NetworkMessage::SyncRequest
-            ) {
-                received_count += 1;
+            match &message {
+                NetworkMessage::Handshake {
+                    ..
+                } => {
+                    network.receive(
+                        message,
+                    );
 
-                println!(
-                    "✅ SyncRequest sayısı: {}",
-                    received_count
-                );
+                    handshake_received =
+                        true;
+
+                    println!(
+                        "✅ Ana Network tanımlanan peer sayısı: {}",
+                        network
+                            .identified_peer_count()
+                    );
+                }
+
+                NetworkMessage::SyncRequest => {
+                    network.receive(
+                        message,
+                    );
+
+                    sync_received =
+                        true;
+
+                    println!(
+                        "✅ Ana node SyncRequest işledi."
+                    );
+                }
+
+                _ => {
+                    network.receive(
+                        message,
+                    );
+                }
             }
         }
 
         println!(
-            "✅ Sürekli listener iki ayrı peer mesajını başarıyla işledi."
+            "✅ Doğrulanmış peer ana Network'e kaydedildi mi: {}",
+            network
+                .identified_peer_count()
+                == 1
         );
 
         server_task.abort();
