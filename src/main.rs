@@ -15,7 +15,15 @@ use crate::core::{Block, Transaction};
 use crate::network::tcp::TcpTransport;
 use crate::network::{Network, NetworkMessage};
 use crate::node::Node;
-use crate::protocol::MAX_SYNC_BLOCKS_PER_MESSAGE;
+use crate::protocol::{
+    GENESIS_SUPPLY_MICRO_AION,
+    GENESIS_TIMESTAMP,
+    GENESIS_VALIDATOR_A_ADDRESS,
+    GENESIS_VALIDATOR_A_STAKE,
+    GENESIS_VALIDATOR_B_ADDRESS,
+    GENESIS_VALIDATOR_B_STAKE,
+    MAX_SYNC_BLOCKS_PER_MESSAGE,
+};
 use crate::state::State;
 use crate::storage::Storage;
 use crate::wallet::Wallet;
@@ -202,77 +210,32 @@ async fn main() {
         let peer_address =
             arguments[2].clone();
 
-        let wallet_password =
-            std::env::var(
-                "AION_WALLET_PASSWORD",
-            )
-            .expect(
-                "Çoklu chain sync testi için AION_WALLET_PASSWORD ortam değişkeni tanımlı olmalı",
-            );
-
-        let (
-            alice_private_key,
-            bob_private_key,
-        ) =
-            Storage::load_wallet_private_keys(
-                &wallet_password,
-            )
-            .expect(
-                "Yerel wallet anahtarları yüklenemedi",
-            )
-            .expect(
-                "Yerel wallet dosyası bulunamadı",
-            );
-
-        let alice_wallet =
-            Wallet::from_private_key_hex(
-                &alice_private_key,
-            )
-            .expect(
-                "Yerel Alice private key geçersiz",
-            );
-
-        let bob_wallet =
-            Wallet::from_private_key_hex(
-                &bob_private_key,
-            )
-            .expect(
-                "Yerel Bob private key geçersiz",
-            );
-
-        let genesis_supply =
-            1000 * 1_000_000;
-
         let mut sync_consensus =
             Consensus::new();
 
         sync_consensus.add_validator(
-            alice_wallet
-                .address()
+            GENESIS_VALIDATOR_A_ADDRESS
                 .to_string(),
-            700,
+            GENESIS_VALIDATOR_A_STAKE,
         );
 
         sync_consensus.add_validator(
-            bob_wallet
-                .address()
+            GENESIS_VALIDATOR_B_ADDRESS
                 .to_string(),
-            300,
+            GENESIS_VALIDATOR_B_STAKE,
         );
 
         let mut sync_state =
             State::new();
 
         sync_state.create_account(
-            alice_wallet
-                .address()
+            GENESIS_VALIDATOR_A_ADDRESS
                 .to_string(),
-            genesis_supply,
+            GENESIS_SUPPLY_MICRO_AION,
         );
 
         sync_state.create_account(
-            bob_wallet
-                .address()
+            GENESIS_VALIDATOR_B_ADDRESS
                 .to_string(),
             0,
         );
@@ -280,7 +243,7 @@ async fn main() {
         let sync_genesis =
             Block::new(
                 0,
-                1754690000,
+                GENESIS_TIMESTAMP,
                 String::from("0"),
                 String::from("GENESIS"),
                 String::new(),
@@ -295,11 +258,19 @@ async fn main() {
         sync_blockchain
             .economy
             .mint(
-                genesis_supply,
+                GENESIS_SUPPLY_MICRO_AION,
             )
             .expect(
                 "Sync genesis arzı oluşturulamadı",
             );
+
+        println!(
+            "✅ Sync node sabit AION genesis yapılandırmasıyla başlatıldı."
+        );
+
+        println!(
+            "✅ Sync için yerel validator private key gerekmiyor."
+        );
 
         let mut sync_node =
             Node::new(

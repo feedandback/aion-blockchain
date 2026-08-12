@@ -60,6 +60,21 @@ pub const SYSTEM_REWARD_SIGNATURE: &str =
 pub const GENESIS_PREVIOUS_HASH: &str = "0";
 pub const GENESIS_VALIDATOR: &str = "GENESIS";
 
+// AION ağının sabit genesis yapılandırması.
+// Her bağımsız node aynı genesis state ve validator setini
+// private key paylaşmadan doğrulayabilmelidir.
+pub const GENESIS_TIMESTAMP: u64 = 1_754_690_000;
+pub const GENESIS_SUPPLY_MICRO_AION: u64 =
+    1_000_000_000;
+
+pub const GENESIS_VALIDATOR_A_ADDRESS: &str =
+    "e78e5a3f52365b555c495371141c05e5992b5f786dd526c778af16dfb8cf822b";
+pub const GENESIS_VALIDATOR_A_STAKE: u64 = 700;
+
+pub const GENESIS_VALIDATOR_B_ADDRESS: &str =
+    "a3c7e0f73b41bc841f8cefe6ff0d43fc24aa259eb4f90db4b408fdc3f4eb5fb4";
+pub const GENESIS_VALIDATOR_B_STAKE: u64 = 300;
+
 pub fn is_fixed_hex(
     value: &str,
     expected_length: usize,
