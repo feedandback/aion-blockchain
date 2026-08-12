@@ -41,6 +41,9 @@ async fn main() {
                 "TCP listener başlatılamadı",
             );
 
+        let listener_wallet =
+            Wallet::new();
+
         println!(
             "AION peer dinleniyor: {}",
             listen_address
@@ -51,30 +54,34 @@ async fn main() {
             listen_address
         );
 
+        let authenticated =
+            TcpTransport::accept_authenticated(
+                &listener,
+                &listener_wallet,
+            )
+            .await;
+
         let (
             mut stream,
             peer_address,
+            handshake,
         ) =
-            TcpTransport::accept_connection(
-                &listener,
-            )
-            .await
-            .expect(
-                "TCP bağlantısı kabul edilemedi",
-            );
+            match authenticated {
+                Ok(result) => result,
 
-        let message =
-            TcpTransport::read_message(
-                &mut stream,
-            )
-            .await
-            .expect(
-                "TCP mesajı okunamadı",
-            );
+                Err(error) => {
+                    println!(
+                        "❌ Kimliği doğrulanmamış P2P bağlantısı reddedildi: {}",
+                        error
+                    );
+
+                    return;
+                }
+            };
 
         println!(
-            "✅ Gerçek TCP mesajı alındı: {:?}",
-            message
+            "✅ Gerçek TCP handshake doğrulandı: {:?}",
+            handshake
         );
 
         println!(
@@ -82,58 +89,18 @@ async fn main() {
             peer_address
         );
 
-        let handshake_challenge =
-            Network::handshake_challenge(
-                &message,
-            )
-            .unwrap_or("")
-            .to_string();
-
         let mut test_network =
             Network::new();
 
         test_network.receive(
-            message,
+            handshake,
         );
-
-        let accepted =
-            test_network
-                .identified_peer_count()
-                == 1;
 
         println!(
             "✅ Tanımlanan peer sayısı: {}",
             test_network
                 .identified_peer_count()
         );
-
-        let listener_wallet =
-            Wallet::new();
-
-        let handshake_ack =
-            Network::create_handshake_ack(
-                &listener_wallet,
-                accepted,
-                handshake_challenge,
-            );
-
-        TcpTransport::send_message(
-            &mut stream,
-            &handshake_ack,
-        )
-        .await
-        .expect(
-            "HandshakeAck gönderilemedi",
-        );
-
-        println!(
-            "✅ HandshakeAck gönderildi. Kabul: {}",
-            accepted
-        );
-
-        if !accepted {
-            return;
-        }
 
         let session_message =
             TcpTransport::read_message(
@@ -414,75 +381,21 @@ async fn main() {
         let test_wallet =
             Wallet::new();
 
-        let handshake =
-            Network::create_handshake(
-                &test_wallet,
-                "127.0.0.1:7002"
-                    .to_string(),
-            );
-
-        let expected_challenge =
-            Network::handshake_challenge(
-                &handshake,
-            )
-            .expect(
-                "Handshake challenge oluşturulamadı",
-            )
-            .to_string();
-
         let mut stream =
-            TcpTransport::connect(
+            TcpTransport::connect_authenticated(
                 &peer_address,
+                &test_wallet,
+                "127.0.0.1:7002",
             )
             .await
             .expect(
-                "Gerçek TCP bağlantısı kurulamadı",
+                "Kimliği doğrulanmış P2P bağlantısı kurulamadı",
             );
 
-        TcpTransport::send_message(
-            &mut stream,
-            &handshake,
-        )
-        .await
-        .expect(
-            "Gerçek TCP handshake gönderilemedi",
-        );
-
         println!(
-            "✅ Handshake gerçek TCP üzerinden gönderildi: {}",
+            "✅ Kimliği doğrulanmış P2P oturumu kuruldu: {}",
             peer_address
         );
-
-        let response =
-            TcpTransport::read_message(
-                &mut stream,
-            )
-            .await
-            .expect(
-                "HandshakeAck okunamadı",
-            );
-
-        println!(
-            "✅ Handshake cevabı alındı: {:?}",
-            response
-        );
-
-        let handshake_ack_valid =
-            Network::validate_handshake_ack(
-                &response,
-                &expected_challenge,
-            );
-
-        println!(
-            "✅ HandshakeAck doğrulandı mı: {}",
-            handshake_ack_valid
-        );
-
-        if !handshake_ack_valid {
-            panic!(
-                "HandshakeAck geçersiz"
-            );
-        }
 
         TcpTransport::send_message(
             &mut stream,

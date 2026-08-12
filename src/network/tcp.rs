@@ -15,7 +15,11 @@ use tokio::sync::{
 };
 use tokio::time::timeout;
 
-use crate::network::NetworkMessage;
+use crate::network::{
+    Network,
+    NetworkMessage,
+};
+use crate::wallet::Wallet;
 use crate::protocol::{
     MAX_CONCURRENT_NETWORK_CONNECTIONS,
     MAX_NETWORK_MESSAGE_BYTES,
@@ -428,6 +432,133 @@ impl TcpTransport {
                 },
             );
         }
+    }
+
+    pub async fn connect_authenticated(
+        address: &str,
+        wallet: &Wallet,
+        listen_address: &str,
+    ) -> Result<TcpStream, String> {
+        let handshake =
+            Network::create_handshake(
+                wallet,
+                listen_address
+                    .to_string(),
+            );
+
+        let expected_challenge =
+            Network::handshake_challenge(
+                &handshake,
+            )
+            .ok_or_else(
+                || {
+                    "Handshake challenge oluşturulamadı"
+                        .to_string()
+                },
+            )?
+            .to_string();
+
+        let mut stream =
+            Self::connect(
+                address,
+            )
+            .await?;
+
+        Self::send_message(
+            &mut stream,
+            &handshake,
+        )
+        .await?;
+
+        let response =
+            Self::read_message(
+                &mut stream,
+            )
+            .await?;
+
+        if !Network::validate_handshake_ack(
+            &response,
+            &expected_challenge,
+        ) {
+            return Err(
+                "Peer HandshakeAck doğrulaması başarısız"
+                    .into(),
+            );
+        }
+
+        Ok(stream)
+    }
+
+    pub async fn accept_authenticated(
+        listener: &TcpListener,
+        wallet: &Wallet,
+    ) -> Result<
+        (
+            TcpStream,
+            String,
+            NetworkMessage,
+        ),
+        String,
+    > {
+        let (
+            mut stream,
+            peer_address,
+        ) =
+            Self::accept_connection(
+                listener,
+            )
+            .await?;
+
+        let handshake =
+            Self::read_message(
+                &mut stream,
+            )
+            .await?;
+
+        let challenge =
+            Network::handshake_challenge(
+                &handshake,
+            )
+            .unwrap_or("")
+            .to_string();
+
+        let mut validation_network =
+            Network::new();
+
+        validation_network.receive(
+            handshake.clone(),
+        );
+
+        let accepted =
+            validation_network
+                .identified_peer_count()
+                == 1;
+
+        let handshake_ack =
+            Network::create_handshake_ack(
+                wallet,
+                accepted,
+                challenge,
+            );
+
+        Self::send_message(
+            &mut stream,
+            &handshake_ack,
+        )
+        .await?;
+
+        if !accepted {
+            return Err(
+                "Peer handshake doğrulaması başarısız"
+                    .into(),
+            );
+        }
+
+        Ok((
+            stream,
+            peer_address,
+            handshake,
+        ))
     }
 
     pub async fn send_and_receive(
