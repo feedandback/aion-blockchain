@@ -1,3 +1,14 @@
+use crate::protocol::{
+    BLOCK_REWARD_MICRO_KBN,
+    BURN_FEE_PERCENT,
+    LIQUIDITY_RESERVE_FEE_PERCENT,
+    MAX_SUPPLY_MICRO_KBN,
+    MIN_TRANSACTION_FEE_MICRO_KBN,
+    TRANSACTION_FEE_DIVISOR,
+    TREASURY_FEE_PERCENT,
+    VALIDATOR_FEE_PERCENT,
+};
+
 #[derive(Debug, Clone)]
 pub struct Economy {
     // Micro unit
@@ -11,6 +22,9 @@ pub struct Economy {
 
     // Minimum transaction fee
     pub minimum_fee: u64,
+
+    // Transaction fee oranının böleni
+    pub fee_divisor: u64,
 
     // Network fee'lerinden biriken Liquidity Reserve
     pub liquidity_reserve: u64,
@@ -34,24 +48,26 @@ impl Economy {
             total_supply: 0,
 
             // 100 milyon KBN
-            max_supply: 100_000_000 * 1_000_000,
+            max_supply: MAX_SUPPLY_MICRO_KBN,
 
             // Validator ödülü
-            block_reward: 10 * 1_000_000,
+            block_reward: BLOCK_REWARD_MICRO_KBN,
 
             // Minimum fee
             // 10 microKBN
-            minimum_fee: 10,
+            minimum_fee: MIN_TRANSACTION_FEE_MICRO_KBN,
+
+            fee_divisor: TRANSACTION_FEE_DIVISOR,
 
             liquidity_reserve: 0,
 
-            validator_fee_percent: 15,
+            validator_fee_percent: VALIDATOR_FEE_PERCENT,
 
-            liquidity_fee_percent: 80,
+            liquidity_fee_percent: LIQUIDITY_RESERVE_FEE_PERCENT,
 
-            treasury_fee_percent: 5,
+            treasury_fee_percent: TREASURY_FEE_PERCENT,
 
-            burn_fee_percent: 0,
+            burn_fee_percent: BURN_FEE_PERCENT,
         }
     }
 
@@ -64,7 +80,7 @@ impl Economy {
         amount: u64,
     ) -> u64 {
         let percentage_fee =
-            amount / 100_000;
+            amount / self.fee_divisor.max(1);
 
         percentage_fee.max(
             self.minimum_fee,

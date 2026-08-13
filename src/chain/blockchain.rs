@@ -150,10 +150,14 @@ impl Blockchain {
         }
 
         // Genesis mevcut Kybernetes protokolünde özel formattadır.
+        // validator_public_key alanı canonical genesis config fingerprint'ini taşır.
         if block.index == 0 {
             if block.previous_hash != GENESIS_PREVIOUS_HASH
                 || block.validator != GENESIS_VALIDATOR
-                || !block.validator_public_key.is_empty()
+                || !is_fixed_hex(
+                    &block.validator_public_key,
+                    HASH_HEX_LENGTH,
+                )
                 || block.validator_signature.is_some()
                 || !block.transactions.is_empty()
             {

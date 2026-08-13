@@ -1,14 +1,13 @@
 use std::sync::OnceLock;
 
+use crate::bootstrap::canonical_bootstrap;
 use crate::chain::{Blockchain, Mempool};
 use crate::consensus::Consensus;
 use crate::core::{Block, Transaction};
 use crate::economy::Economy;
 use crate::network::NetworkMessage;
 use crate::node::Node;
-use crate::protocol::{
-    GENESIS_PREVIOUS_HASH, GENESIS_TIMESTAMP, GENESIS_VALIDATOR, MAX_SYNC_BLOCKS_PER_MESSAGE,
-};
+use crate::protocol::{GENESIS_TIMESTAMP, MAX_SYNC_BLOCKS_PER_MESSAGE};
 use crate::state::State;
 use crate::wallet::Wallet;
 
@@ -20,15 +19,57 @@ fn wallet(byte: &str) -> Wallet {
     Wallet::from_private_key_hex(&byte.repeat(32)).expect("test private key must be valid")
 }
 
+#[test]
+fn committed_configuration_changes_alter_fingerprint_and_genesis_hash() {
+    let ((baseline_fingerprint, baseline_hash), variants) =
+        crate::bootstrap::genesis_identity_test_vectors()
+            .expect("genesis identity test vectors must be serializable");
+    let fields = variants
+        .iter()
+        .map(|(field, _, _)| *field)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        fields,
+        vec![
+            "network_id",
+            "network_protocol_version",
+            "genesis_timestamp",
+            "validator_address",
+            "validator_stake",
+            "genesis_allocation",
+            "genesis_supply",
+            "max_supply",
+            "block_reward",
+            "minimum_fee",
+            "fee_divisor",
+            "validator_percent",
+            "liquidity_reserve_percent",
+            "treasury_percent",
+            "burn_percent",
+            "initial_liquidity_reserve",
+            "initial_treasury_balance",
+            "initial_burned_amount",
+        ]
+    );
+
+    for (field, fingerprint, hash) in variants {
+        assert_ne!(
+            fingerprint, baseline_fingerprint,
+            "{field} fingerprint'e bağlı değil"
+        );
+        assert_ne!(hash, baseline_hash, "{field} genesis hash'e bağlı değil");
+    }
+}
+
 fn genesis_block() -> Block {
-    Block::new(
-        0,
-        GENESIS_TIMESTAMP,
-        GENESIS_PREVIOUS_HASH.to_string(),
-        GENESIS_VALIDATOR.to_string(),
-        String::new(),
-        Vec::new(),
-    )
+    canonical_bootstrap()
+        .expect("canonical test bootstrap must be valid")
+        .blockchain
+        .chain
+        .into_iter()
+        .next()
+        .expect("canonical test chain must contain genesis")
 }
 
 fn initial_state(sender: &Wallet, recipient: &Wallet, validator: &Wallet) -> State {
@@ -203,6 +244,27 @@ fn chain_sync_node() -> Node {
     assert!(consensus.add_validator(validator.address().to_string(), 1));
 
     Node::new(Blockchain::new(genesis_block()), state, consensus)
+}
+
+#[test]
+fn canonical_node_rejects_a_different_valid_genesis_commitment() {
+    let local = canonical_bootstrap().expect("canonical local bootstrap must be valid");
+    let local_genesis_hash = local.blockchain.chain[0].hash.clone();
+    let mut node = Node::new(local.blockchain, local.state, local.consensus);
+    let mut remote_genesis = genesis_block();
+
+    remote_genesis.validator_public_key = "0".repeat(64);
+    remote_genesis.hash = remote_genesis.calculate_hash();
+
+    assert!(remote_genesis.is_hash_valid());
+    assert!(Blockchain::new(remote_genesis.clone()).is_valid());
+    assert_ne!(remote_genesis.hash, local_genesis_hash);
+
+    let result = node.apply_chain_chunk_without_persisting_for_test(0, 1, vec![remote_genesis]);
+
+    assert!(result.is_err());
+    assert_eq!(node.blockchain.height(), 1);
+    assert_eq!(node.blockchain.chain[0].hash, local_genesis_hash);
 }
 
 #[test]

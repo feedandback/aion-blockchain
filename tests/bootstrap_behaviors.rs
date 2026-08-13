@@ -4,12 +4,16 @@ use kybernetes::protocol::{
     GENESIS_PREVIOUS_HASH, GENESIS_SUPPLY_MICRO_KBN, GENESIS_TIMESTAMP, GENESIS_VALIDATOR,
     GENESIS_VALIDATOR_A_ADDRESS, GENESIS_VALIDATOR_A_ALLOCATION_MICRO_KBN,
     GENESIS_VALIDATOR_A_STAKE, GENESIS_VALIDATOR_B_ADDRESS,
-    GENESIS_VALIDATOR_B_ALLOCATION_MICRO_KBN, GENESIS_VALIDATOR_B_STAKE,
+    GENESIS_VALIDATOR_B_ALLOCATION_MICRO_KBN, GENESIS_VALIDATOR_B_STAKE, HASH_HEX_LENGTH,
 };
 use kybernetes::wallet::Wallet;
 
 const PRIVATE_KEY_ONE: &str = "0101010101010101010101010101010101010101010101010101010101010101";
 const PRIVATE_KEY_TWO: &str = "0202020202020202020202020202020202020202020202020202020202020202";
+const GENESIS_FINGERPRINT: &str =
+    "0bc11d7710ac5dd8969133a5b721d34d0410c144d5bd87cfdbccc2d3c421cfef";
+const GENESIS_HASH: &str =
+    "791abca72f3ff947dc7fdfbd854bde83a72ecf8fae812b21f00a53bb75ad640c";
 
 fn bootstrap() -> CanonicalBootstrap {
     canonical_bootstrap().expect("canonical bootstrap must be valid")
@@ -37,13 +41,14 @@ fn validator_snapshot(bootstrap: &CanonicalBootstrap) -> Vec<(String, u64)> {
 
 fn economy_snapshot(
     bootstrap: &CanonicalBootstrap,
-) -> (u64, u64, u64, u64, u64, u64, u64, u64, u64) {
+) -> (u64, u64, u64, u64, u64, u64, u64, u64, u64, u64) {
     let economy = &bootstrap.blockchain.economy;
     (
         economy.total_supply,
         economy.max_supply,
         economy.block_reward,
         economy.minimum_fee,
+        economy.fee_divisor,
         economy.liquidity_reserve,
         economy.validator_fee_percent,
         economy.liquidity_fee_percent,
@@ -76,11 +81,44 @@ fn canonical_bootstraps_have_the_same_genesis_hash() {
     assert_eq!(first_genesis.timestamp, GENESIS_TIMESTAMP);
     assert_eq!(first_genesis.previous_hash, GENESIS_PREVIOUS_HASH);
     assert_eq!(first_genesis.validator, GENESIS_VALIDATOR);
-    assert!(first_genesis.validator_public_key.is_empty());
+    assert_eq!(
+        first_genesis.validator_public_key,
+        first.genesis_fingerprint
+    );
     assert!(first_genesis.validator_signature.is_none());
     assert!(first_genesis.transactions.is_empty());
     assert!(first.blockchain.is_valid());
     assert!(second.blockchain.is_valid());
+}
+
+#[test]
+fn canonical_genesis_fingerprint_is_deterministic_and_bound_to_block_hash() {
+    let first = bootstrap();
+    let second = bootstrap();
+    let first_genesis = &first.blockchain.chain[0];
+    let second_genesis = &second.blockchain.chain[0];
+
+    assert_eq!(first.genesis_fingerprint, second.genesis_fingerprint);
+    assert_eq!(first.genesis_fingerprint, GENESIS_FINGERPRINT);
+    assert_eq!(first.genesis_fingerprint.len(), HASH_HEX_LENGTH);
+    assert!(
+        first
+            .genesis_fingerprint
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
+    assert_eq!(
+        first_genesis.validator_public_key,
+        first.genesis_fingerprint
+    );
+    assert_eq!(
+        second_genesis.validator_public_key,
+        second.genesis_fingerprint
+    );
+    assert_eq!(first_genesis.hash, second_genesis.hash);
+    assert_eq!(first_genesis.hash, GENESIS_HASH);
+    assert_eq!(first_genesis.hash, first_genesis.calculate_hash());
+    assert_eq!(second_genesis.hash, second_genesis.calculate_hash());
 }
 
 #[test]
@@ -165,6 +203,7 @@ fn canonical_bootstraps_have_the_same_initial_economy() {
     assert_eq!(first.blockchain.economy.max_supply, baseline.max_supply);
     assert_eq!(first.blockchain.economy.block_reward, baseline.block_reward);
     assert_eq!(first.blockchain.economy.minimum_fee, baseline.minimum_fee);
+    assert_eq!(first.blockchain.economy.fee_divisor, baseline.fee_divisor);
     assert_eq!(
         first.blockchain.economy.validator_fee_percent,
         baseline.validator_fee_percent

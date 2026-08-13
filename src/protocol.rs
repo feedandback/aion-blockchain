@@ -78,6 +78,19 @@ pub const GENESIS_VALIDATOR_B_ADDRESS: &str =
 pub const GENESIS_VALIDATOR_B_STAKE: u64 = 300;
 pub const GENESIS_VALIDATOR_B_ALLOCATION_MICRO_KBN: u64 = 0;
 
+// Kybernetes V2 consensus ekonomi parametreleri.
+// Economy ve canonical genesis fingerprint aynı sabitleri kullanır.
+pub const MAX_SUPPLY_MICRO_KBN: u64 =
+    100_000_000 * 1_000_000;
+pub const BLOCK_REWARD_MICRO_KBN: u64 =
+    10 * 1_000_000;
+pub const MIN_TRANSACTION_FEE_MICRO_KBN: u64 = 10;
+pub const TRANSACTION_FEE_DIVISOR: u64 = 100_000;
+pub const VALIDATOR_FEE_PERCENT: u64 = 15;
+pub const LIQUIDITY_RESERVE_FEE_PERCENT: u64 = 80;
+pub const TREASURY_FEE_PERCENT: u64 = 5;
+pub const BURN_FEE_PERCENT: u64 = 0;
+
 pub fn is_fixed_hex(
     value: &str,
     expected_length: usize,

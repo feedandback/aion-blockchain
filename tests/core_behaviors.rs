@@ -1,9 +1,10 @@
+use kybernetes::bootstrap::canonical_bootstrap;
 use kybernetes::chain::{Blockchain, Mempool};
 use kybernetes::consensus::Consensus;
 use kybernetes::core::{Block, Transaction};
 use kybernetes::economy::Economy;
 use kybernetes::node::Node;
-use kybernetes::protocol::{GENESIS_PREVIOUS_HASH, GENESIS_TIMESTAMP, GENESIS_VALIDATOR};
+use kybernetes::protocol::GENESIS_TIMESTAMP;
 use kybernetes::state::State;
 use kybernetes::wallet::Wallet;
 
@@ -40,14 +41,13 @@ fn signed_transaction(
 }
 
 fn genesis_block() -> Block {
-    Block::new(
-        0,
-        GENESIS_TIMESTAMP,
-        GENESIS_PREVIOUS_HASH.to_string(),
-        GENESIS_VALIDATOR.to_string(),
-        String::new(),
-        Vec::new(),
-    )
+    canonical_bootstrap()
+        .expect("canonical test bootstrap must be valid")
+        .blockchain
+        .chain
+        .into_iter()
+        .next()
+        .expect("canonical test chain must contain genesis")
 }
 
 fn signed_empty_block(genesis: &Block, validator: &Wallet) -> Block {
