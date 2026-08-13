@@ -6,9 +6,13 @@ mod economy;
 mod network;
 mod node;
 mod protocol;
+mod runtime;
 mod state;
 mod storage;
+mod validator;
 mod wallet;
+
+use std::io::{IsTerminal, Read};
 
 use crate::bootstrap::canonical_bootstrap;
 use crate::core::Transaction;
@@ -16,7 +20,15 @@ use crate::network::tcp::TcpTransport;
 use crate::network::{Network, NetworkMessage};
 use crate::node::Node;
 use crate::protocol::MAX_SYNC_BLOCKS_PER_MESSAGE;
+use crate::runtime::{
+    NODE_LISTEN_ADDRESS_ENV,
+    NODE_PEERS_ENV,
+    NodeRuntime,
+    RuntimeConfig,
+    VALIDATOR_PASSWORD_ENV,
+};
 use crate::storage::Storage;
+use crate::validator::ValidatorKeystore;
 use crate::wallet::Wallet;
 
 const WALLET_PASSWORD_ENV: &str =
@@ -31,6 +43,67 @@ async fn main() {
         Vec<String> =
         std::env::args()
             .collect();
+
+    if arguments.get(1).map(String::as_str)
+        == Some("provision-validator")
+    {
+        let password = match std::env::var(
+            VALIDATOR_PASSWORD_ENV,
+        ) {
+            Ok(password)
+                if !password.trim().is_empty() => password,
+            _ => {
+                eprintln!(
+                    "{} ortam değişkeni tanımlı olmalı",
+                    VALIDATOR_PASSWORD_ENV
+                );
+                std::process::exit(1);
+            }
+        };
+        let stdin = std::io::stdin();
+        if stdin.is_terminal() {
+            eprintln!(
+                "Validator private key terminalden echo ile okunmaz; erişimi sınırlı bir dosyadan stdin'e pipe edin"
+            );
+            std::process::exit(1);
+        }
+        let mut private_key = String::new();
+        if let Err(error) = stdin.take(129).read_to_string(&mut private_key) {
+            eprintln!("Validator private key stdin'den okunamadı: {error}");
+            std::process::exit(1);
+        }
+        if private_key.len() > 128 || private_key.trim().len() != 64 {
+            eprintln!("Validator private key tam olarak 32-byte hex olmalı");
+            std::process::exit(1);
+        }
+
+        let bootstrap = match canonical_bootstrap() {
+            Ok(bootstrap) => bootstrap,
+            Err(error) => {
+                eprintln!("Canonical bootstrap oluşturulamadı: {error}");
+                std::process::exit(1);
+            }
+        };
+        let keystore = ValidatorKeystore::configured();
+        match keystore.provision(
+            &password,
+            private_key.trim(),
+            &bootstrap.consensus,
+            &bootstrap.genesis_fingerprint,
+        ) {
+            Ok(address) => println!(
+                "Validator keystore oluşturuldu: {} ({})",
+                address,
+                keystore.path().display()
+            ),
+            Err(error) => {
+                eprintln!("Validator provisioning başarısız: {error}");
+                std::process::exit(1);
+            }
+        }
+
+        return;
+    }
 
     if arguments.len() >= 3
         && arguments[1] == "chunk-sync-listen"
@@ -1180,6 +1253,74 @@ async fn main() {
             peer_address
         );
 
+        return;
+    }
+
+    if arguments.len() == 1
+        || arguments.get(1).map(String::as_str)
+            == Some("node")
+    {
+        let listen_address = arguments
+            .get(2)
+            .cloned()
+            .or_else(|| std::env::var(NODE_LISTEN_ADDRESS_ENV).ok())
+            .filter(|address| !address.trim().is_empty())
+            .unwrap_or_else(|| "127.0.0.1:7000".to_string());
+        let mut peers = arguments
+            .iter()
+            .skip(3)
+            .filter(|peer| !peer.trim().is_empty())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if let Ok(configured_peers) = std::env::var(NODE_PEERS_ENV) {
+            peers.extend(
+                configured_peers
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|peer| !peer.is_empty())
+                    .map(str::to_string),
+            );
+        }
+        peers.sort();
+        peers.dedup();
+
+        let validator_password = std::env::var(
+            VALIDATOR_PASSWORD_ENV,
+        )
+        .ok()
+        .filter(|password| !password.trim().is_empty());
+        let runtime = match NodeRuntime::initialize_at(
+            Storage::data_directory(),
+            validator_password.as_deref(),
+        ) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                eprintln!("Kybernetes node runtime başlatılamadı: {error}");
+                std::process::exit(1);
+            }
+        };
+
+        if let Err(error) = runtime
+            .run(RuntimeConfig {
+                listen_address,
+                peers,
+            })
+            .await
+        {
+            eprintln!("Kybernetes node runtime durdu: {error}");
+            std::process::exit(1);
+        }
+
+        return;
+    }
+
+    if arguments.get(1).map(String::as_str)
+        != Some("demo")
+    {
+        eprintln!(
+            "Kullanım: kybernetes [node [listen_address] [peer...]] | provision-validator | demo | mevcut test CLI modu"
+        );
         return;
     }
 

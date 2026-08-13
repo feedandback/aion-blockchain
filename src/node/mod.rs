@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use crate::chain::{Blockchain, Mempool};
 use crate::consensus::Consensus;
 use crate::core::{Block, Transaction};
@@ -32,6 +34,8 @@ pub struct Node {
     genesis_state: State,
     genesis_economy: Economy,
 
+    storage_directory: PathBuf,
+
     // Parçalı blockchain senkronizasyonu için
     // geçici uzak zincir tamponu.
     sync_buffer: Vec<Block>,
@@ -48,6 +52,20 @@ impl Node {
         state: State,
         consensus: Consensus,
     ) -> Self {
+        Self::new_with_data_directory(
+            blockchain,
+            state,
+            consensus,
+            Storage::data_directory(),
+        )
+    }
+
+    pub fn new_with_data_directory(
+        blockchain: Blockchain,
+        state: State,
+        consensus: Consensus,
+        storage_directory: PathBuf,
+    ) -> Self {
         let genesis_state = state.clone();
         let genesis_economy = blockchain.economy.clone();
 
@@ -59,11 +77,16 @@ impl Node {
             network: Network::new(),
             genesis_state,
             genesis_economy,
+            storage_directory,
             sync_buffer: Vec::new(),
             sync_expected_total: None,
             #[cfg(test)]
             skip_chain_sync_persistence_for_test: false,
         }
+    }
+
+    pub fn storage_directory(&self) -> &Path {
+        &self.storage_directory
     }
 
     pub fn restore_chain_from_storage(
@@ -1202,7 +1225,8 @@ impl Node {
                 rebuilt_state,
             )) => {
                 if let Err(error) =
-                    Storage::save_blockchain(
+                    Storage::save_blockchain_to(
+                        &self.storage_directory,
                         &candidate_blockchain
                             .chain,
                     )
@@ -1245,6 +1269,92 @@ impl Node {
                 false
             }
         }
+    }
+
+    pub(crate) fn apply_block_to_sync_candidate(
+        &mut self,
+        block: Block,
+    ) -> Result<(), String> {
+        let confirmed_block = block.clone();
+        let (candidate_blockchain, rebuilt_state) = self.validate_and_apply_block(
+            block,
+            &self.blockchain,
+            &self.state,
+        )?;
+
+        self.blockchain = candidate_blockchain;
+        self.state = rebuilt_state;
+        self.remove_confirmed_transactions(&confirmed_block);
+
+        Ok(())
+    }
+
+    pub(crate) fn sync_candidate_snapshot(&self) -> Self {
+        Self::new_with_data_directory(
+            self.blockchain.clone(),
+            self.state.clone(),
+            self.consensus.clone(),
+            PathBuf::new(),
+        )
+    }
+
+    pub(crate) fn adopt_validated_sync_candidate(
+        &mut self,
+        candidate_blockchain: Blockchain,
+        candidate_state: State,
+    ) -> Result<(), String> {
+        let local_genesis = self
+            .blockchain
+            .chain
+            .first()
+            .ok_or("Yerel genesis bulunamadı")?;
+        let candidate_genesis = candidate_blockchain
+            .chain
+            .first()
+            .ok_or("Candidate genesis bulunamadı")?;
+
+        if candidate_genesis.hash != local_genesis.hash {
+            return Err("Candidate genesis yerel genesis ile uyuşmuyor".into());
+        }
+        if candidate_blockchain.chain.len() < self.blockchain.chain.len() {
+            return Err("Candidate blockchain mevcut zincirden kısa".into());
+        }
+        if candidate_blockchain.chain.len() == self.blockchain.chain.len() {
+            let candidate_tip = candidate_blockchain
+                .chain
+                .last()
+                .ok_or("Candidate blockchain boş")?;
+            let local_tip = self
+                .blockchain
+                .chain
+                .last()
+                .ok_or("Yerel blockchain boş")?;
+            if candidate_tip.hash != local_tip.hash {
+                return Err("Eşit uzunlukta farklı candidate fork reddedildi".into());
+            }
+            return Ok(());
+        }
+
+        Storage::save_blockchain_to(
+            &self.storage_directory,
+            &candidate_blockchain.chain,
+        )
+        .map_err(|error| {
+            format!("Senkronize blockchain kalıcı kayda yazılamadı: {error}")
+        })?;
+
+        self.blockchain = candidate_blockchain;
+        self.state = candidate_state;
+        self.mempool = Mempool::new();
+
+        Ok(())
+    }
+
+    pub(crate) fn verify_equal_chain(&mut self, chain: Vec<Block>) -> Result<(), String> {
+        if chain.len() != self.blockchain.chain.len() {
+            return Err("Doğrulanacak remote zincir yerel zincirle eşit uzunlukta değil".into());
+        }
+        self.synchronize_chain(chain)
     }
 
     // ==========================
@@ -1636,7 +1746,8 @@ impl Node {
         // ==========================
 
         #[cfg(not(test))]
-        Storage::save_blockchain(
+        Storage::save_blockchain_to(
+            &self.storage_directory,
             &rebuilt_blockchain
                 .chain,
         )
@@ -1651,7 +1762,8 @@ impl Node {
 
         #[cfg(test)]
         if !self.skip_chain_sync_persistence_for_test {
-            Storage::save_blockchain(
+            Storage::save_blockchain_to(
+                &self.storage_directory,
                 &rebuilt_blockchain
                     .chain,
             )
@@ -1796,7 +1908,8 @@ impl Node {
         // KALICI KAYIT + ATOMİK COMMIT
         // ==========================
 
-        Storage::save_blockchain(
+        Storage::save_blockchain_to(
+            &self.storage_directory,
             &candidate_blockchain
                 .chain,
         )

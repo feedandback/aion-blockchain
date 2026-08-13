@@ -6,8 +6,10 @@ pub mod economy;
 pub mod network;
 pub mod node;
 pub mod protocol;
+pub mod runtime;
 pub mod state;
 pub mod storage;
+pub mod validator;
 pub mod wallet;
 
 #[cfg(test)]

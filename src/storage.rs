@@ -6,7 +6,7 @@ use std::io::{
     Read,
     Write,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use argon2::Argon2;
 use chacha20poly1305::{
@@ -101,18 +101,32 @@ impl Storage {
 
     pub fn blockchain_path(
     ) -> PathBuf {
-        Self::data_directory()
-            .join(
-                BLOCKCHAIN_FILE_NAME,
-            )
+        Self::blockchain_path_in(
+            &Self::data_directory(),
+        )
     }
 
     fn blockchain_temp_path(
     ) -> PathBuf {
-        Self::data_directory()
-            .join(
-                BLOCKCHAIN_TEMP_FILE_NAME,
-            )
+        Self::blockchain_temp_path_in(
+            &Self::data_directory(),
+        )
+    }
+
+    fn blockchain_path_in(
+        data_directory: &Path,
+    ) -> PathBuf {
+        data_directory.join(
+            BLOCKCHAIN_FILE_NAME,
+        )
+    }
+
+    fn blockchain_temp_path_in(
+        data_directory: &Path,
+    ) -> PathBuf {
+        data_directory.join(
+            BLOCKCHAIN_TEMP_FILE_NAME,
+        )
     }
 
     pub fn wallets_path(
@@ -136,8 +150,28 @@ impl Storage {
         let data_directory =
             Self::data_directory();
 
-        fs::create_dir_all(
+        Self::ensure_data_directory_at(
             &data_directory,
+        )
+    }
+
+    fn unique_blockchain_temp_path(
+        data_directory: &Path,
+    ) -> PathBuf {
+        let random_name = hex::encode(
+            chacha20poly1305::Key::generate(),
+        );
+        data_directory.join(
+            format!(".{BLOCKCHAIN_TEMP_FILE_NAME}-{random_name}"),
+        )
+    }
+
+    fn ensure_data_directory_at(
+        data_directory: &Path,
+    ) -> Result<(), String> {
+
+        fs::create_dir_all(
+            data_directory,
         )
         .map_err(
             |error| {
@@ -153,6 +187,19 @@ impl Storage {
     pub fn save_blockchain(
         chain: &[Block],
     ) -> Result<(), String> {
+        let data_directory =
+            Self::data_directory();
+
+        Self::save_blockchain_to(
+            &data_directory,
+            chain,
+        )
+    }
+
+    pub fn save_blockchain_to(
+        data_directory: &Path,
+        chain: &[Block],
+    ) -> Result<(), String> {
         if chain.is_empty() {
             return Err(
                 "Boş blockchain kaydedilemez"
@@ -160,7 +207,9 @@ impl Storage {
             );
         }
 
-        Self::ensure_data_directory()?;
+        Self::ensure_data_directory_at(
+            data_directory,
+        )?;
 
         let serialized =
             serde_json::to_vec_pretty(
@@ -176,16 +225,23 @@ impl Storage {
             )?;
 
         let temp_path =
-            Self::blockchain_temp_path();
+            Self::unique_blockchain_temp_path(
+                data_directory,
+            );
 
         let final_path =
-            Self::blockchain_path();
+            Self::blockchain_path_in(
+                data_directory,
+            );
 
         {
             let mut file =
-                File::create(
-                    &temp_path,
-                )
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(
+                        &temp_path,
+                    )
                 .map_err(
                     |error| {
                         format!(
@@ -218,21 +274,7 @@ impl Storage {
                 )?;
         }
 
-        if final_path.exists() {
-            fs::remove_file(
-                &final_path,
-            )
-            .map_err(
-                |error| {
-                    format!(
-                        "Eski blockchain dosyası silinemedi: {}",
-                        error
-                    )
-                },
-            )?;
-        }
-
-        fs::rename(
+        Self::replace_blockchain_file(
             &temp_path,
             &final_path,
         )
@@ -245,7 +287,69 @@ impl Storage {
             },
         )?;
 
+        #[cfg(unix)]
+        if let Err(error) =
+            File::open(data_directory).and_then(|directory| directory.sync_all())
+        {
+            eprintln!(
+                "Blockchain dosyası atomik olarak değiştirildi fakat data klasörü fsync başarısız: {error}"
+            );
+        }
+
         Ok(())
+    }
+
+    #[cfg(not(windows))]
+    fn replace_blockchain_file(
+        temp_path: &Path,
+        final_path: &Path,
+    ) -> std::io::Result<()> {
+        fs::rename(temp_path, final_path)
+    }
+
+    #[cfg(windows)]
+    fn replace_blockchain_file(
+        temp_path: &Path,
+        final_path: &Path,
+    ) -> std::io::Result<()> {
+        use std::iter;
+        use std::os::windows::ffi::OsStrExt;
+
+        const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+        const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+        #[link(name = "Kernel32")]
+        unsafe extern "system" {
+            fn MoveFileExW(
+                existing_file_name: *const u16,
+                new_file_name: *const u16,
+                flags: u32,
+            ) -> i32;
+        }
+
+        let existing_file_name = temp_path
+            .as_os_str()
+            .encode_wide()
+            .chain(iter::once(0))
+            .collect::<Vec<_>>();
+        let new_file_name = final_path
+            .as_os_str()
+            .encode_wide()
+            .chain(iter::once(0))
+            .collect::<Vec<_>>();
+        let replaced = unsafe {
+            MoveFileExW(
+                existing_file_name.as_ptr(),
+                new_file_name.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+
+        if replaced == 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
     }
 
     pub fn load_blockchain(
@@ -253,25 +357,47 @@ impl Storage {
         Option<Vec<Block>>,
         String,
     > {
-        let path =
-            Self::blockchain_path();
+        let data_directory =
+            Self::data_directory();
 
-        if !path.exists() {
-            return Ok(None);
-        }
+        Self::load_blockchain_from(
+            &data_directory,
+        )
+    }
+
+    pub fn load_blockchain_from(
+        data_directory: &Path,
+    ) -> Result<
+        Option<Vec<Block>>,
+        String,
+    > {
+        let path =
+            Self::blockchain_path_in(
+                data_directory,
+            );
 
         let mut file =
-            File::open(
+            match File::open(
                 &path,
-            )
-            .map_err(
-                |error| {
-                    format!(
-                        "Blockchain dosyası açılamadı: {}",
-                        error
-                    )
-                },
-            )?;
+            ) {
+                Ok(file) => file,
+
+                Err(error)
+                    if error.kind()
+                        == std::io::ErrorKind::NotFound =>
+                {
+                    return Ok(None);
+                }
+
+                Err(error) => {
+                    return Err(
+                        format!(
+                            "Blockchain dosyası açılamadı: {}",
+                            error
+                        ),
+                    );
+                }
+            };
 
         let mut bytes =
             Vec::new();

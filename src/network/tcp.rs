@@ -839,13 +839,34 @@ impl TcpTransport {
         String,
     > {
         let (
-            mut stream,
+            stream,
             peer_address,
         ) =
             Self::accept_connection(
                 listener,
             )
             .await?;
+
+        Self::authenticate_incoming(
+            stream,
+            peer_address,
+            wallet,
+        )
+        .await
+    }
+
+    pub async fn authenticate_incoming(
+        mut stream: TcpStream,
+        peer_address: String,
+        wallet: &Wallet,
+    ) -> Result<
+        (
+            TcpStream,
+            String,
+            NetworkMessage,
+        ),
+        String,
+    > {
 
         let handshake =
             Self::read_message(
