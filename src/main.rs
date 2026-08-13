@@ -49,7 +49,7 @@ async fn main() {
     {
         if arguments.len() != 3 {
             eprintln!(
-                "Kullanım: kybernetes validator generate-candidate | activate-candidate"
+                "Kullanım: kybernetes validator generate-candidate | candidate-address | activate-candidate"
             );
             std::process::exit(1);
         }
@@ -79,6 +79,22 @@ async fn main() {
                     ),
                     Err(error) => {
                         eprintln!("Candidate validator üretilemedi: {error}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "candidate-address" => {
+                match candidate_keystore.load(&password) {
+                    Ok(Some(candidate)) => println!(
+                        "Candidate validator address: {}",
+                        candidate.address()
+                    ),
+                    Ok(None) => {
+                        eprintln!("Validator candidate keystore bulunamadı");
+                        std::process::exit(1);
+                    }
+                    Err(_) => {
+                        eprintln!("Candidate validator address okunamadı");
                         std::process::exit(1);
                     }
                 }
@@ -115,7 +131,7 @@ async fn main() {
             }
             _ => {
                 eprintln!(
-                    "Kullanım: kybernetes validator generate-candidate | activate-candidate"
+                    "Kullanım: kybernetes validator generate-candidate | candidate-address | activate-candidate"
                 );
                 std::process::exit(1);
             }
@@ -1399,7 +1415,7 @@ async fn main() {
         != Some("demo")
     {
         eprintln!(
-            "Kullanım: kybernetes [node [listen_address] [peer...]] | validator generate-candidate | validator activate-candidate | provision-validator | demo | mevcut test CLI modu"
+            "Kullanım: kybernetes [node [listen_address] [peer...]] | validator generate-candidate | validator candidate-address | validator activate-candidate | provision-validator | demo | mevcut test CLI modu"
         );
         return;
     }

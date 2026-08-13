@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -58,6 +59,15 @@ fn generate_candidate(
         .generate(password)
         .expect("candidate generation must succeed");
     (keystore, address)
+}
+
+fn run_candidate_address(directory: &Path, password: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_kybernetes"))
+        .args(["validator", "candidate-address"])
+        .env("KYBERNETES_DATA_DIR", directory)
+        .env("KYBERNETES_VALIDATOR_PASSWORD", password)
+        .output()
+        .expect("candidate-address command must run")
 }
 
 #[test]
@@ -131,6 +141,75 @@ fn candidate_opens_with_the_correct_password() {
         .expect("candidate must exist");
 
     assert_eq!(candidate.address(), address);
+}
+
+#[test]
+fn candidate_address_command_returns_only_the_public_address() {
+    let directory = TestDirectory::new("address-command");
+    let (_, address) = generate_candidate(directory.path(), PASSWORD);
+
+    let output = run_candidate_address(directory.path(), PASSWORD);
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .expect("command output must be UTF-8")
+            .replace("\r\n", "\n"),
+        format!("Candidate validator address: {address}\n")
+    );
+    assert!(output.stderr.is_empty());
+    assert!(
+        !ValidatorKeystore::at(directory.path())
+            .exists()
+            .expect("active keystore path must be inspectable")
+    );
+}
+
+#[test]
+fn candidate_address_command_rejects_the_wrong_password() {
+    let directory = TestDirectory::new("address-command-wrong-password");
+    let (keystore, _) = generate_candidate(directory.path(), PASSWORD);
+    let original = std::fs::read(keystore.path()).expect("candidate must be readable");
+
+    let output = run_candidate_address(directory.path(), WRONG_PASSWORD);
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr)
+            .expect("command error output must be UTF-8")
+            .replace("\r\n", "\n"),
+        "Candidate validator address okunamadı\n"
+    );
+    assert_eq!(
+        std::fs::read(keystore.path()).expect("candidate must remain readable"),
+        original
+    );
+    assert!(
+        !ValidatorKeystore::at(directory.path())
+            .exists()
+            .expect("active keystore path must be inspectable")
+    );
+}
+
+#[test]
+fn candidate_address_command_keeps_the_candidate_byte_for_byte_unchanged() {
+    let directory = TestDirectory::new("address-command-read-only");
+    let (keystore, _) = generate_candidate(directory.path(), PASSWORD);
+    let original = std::fs::read(keystore.path()).expect("candidate must be readable");
+
+    let output = run_candidate_address(directory.path(), PASSWORD);
+
+    assert!(output.status.success());
+    assert_eq!(
+        std::fs::read(keystore.path()).expect("candidate must remain readable"),
+        original
+    );
+    assert!(
+        !ValidatorKeystore::at(directory.path())
+            .exists()
+            .expect("active keystore path must be inspectable")
+    );
 }
 
 #[test]
