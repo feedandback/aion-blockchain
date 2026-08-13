@@ -1,4 +1,8 @@
-use kybernetes::network::{Network, NetworkMessage};
+use kybernetes::network::{
+    Network,
+    NetworkMessage,
+    PeerRegistrationOutcome,
+};
 use kybernetes::protocol::{MAX_HANDSHAKE_AGE_SECONDS, NETWORK_ID, NETWORK_PROTOCOL_VERSION};
 use kybernetes::wallet::Wallet;
 
@@ -84,6 +88,42 @@ fn network_accepts_a_valid_signed_handshake() {
     assert_eq!(network.peer_count(), 1);
     assert_eq!(network.identified_peer_count(), 1);
     assert!(network.has_peer_node_id(wallet.node_id()));
+    assert_eq!(network.message_count(), 1);
+}
+
+#[test]
+fn network_classifies_an_existing_peer_as_duplicate() {
+    let wallet = wallet();
+    let challenge = "34".repeat(32);
+    let message = signed_handshake(
+        &wallet,
+        NETWORK_ID,
+        NETWORK_PROTOCOL_VERSION,
+        Network::current_timestamp(),
+        &challenge,
+    );
+    let mut network = Network::new();
+
+    network.receive(message);
+    let reconnect = signed_handshake(
+        &wallet,
+        NETWORK_ID,
+        NETWORK_PROTOCOL_VERSION,
+        Network::current_timestamp(),
+        &"56".repeat(32),
+    );
+    assert!(Network::validate_handshake(&reconnect));
+    let duplicate = network.register_peer_identity(
+        wallet.node_id().to_string(),
+        LISTEN_ADDRESS.to_string(),
+    );
+
+    assert_eq!(
+        duplicate,
+        PeerRegistrationOutcome::AlreadyRegistered
+    );
+    assert_eq!(network.peer_count(), 1);
+    assert_eq!(network.identified_peer_count(), 1);
     assert_eq!(network.message_count(), 1);
 }
 

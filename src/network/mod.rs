@@ -89,6 +89,22 @@ pub struct PeerIdentity {
     pub listen_address: String,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+pub enum PeerRegistrationOutcome {
+    Registered,
+    AlreadyRegistered,
+    NodeIdConflict,
+    ListenAddressConflict,
+    PeerLimitReached,
+    InvalidIdentity,
+}
+
 #[derive(Debug, Default)]
 pub struct Network {
     pub peers: Vec<String>,
@@ -462,6 +478,19 @@ impl Network {
         }
     }
 
+    pub fn validate_handshake(
+        message: &NetworkMessage,
+    ) -> bool {
+        matches!(
+            message,
+            NetworkMessage::Handshake {
+                ..
+            }
+        ) && Self::message_within_limits(
+            message,
+        )
+    }
+
     fn print_message_summary(
         message: &NetworkMessage,
     ) {
@@ -579,6 +608,20 @@ impl Network {
         node_id: String,
         listen_address: String,
     ) -> bool {
+        matches!(
+            self.register_peer_identity(
+                node_id,
+                listen_address,
+            ),
+            PeerRegistrationOutcome::Registered
+        )
+    }
+
+    pub fn register_peer_identity(
+        &mut self,
+        node_id: String,
+        listen_address: String,
+    ) -> PeerRegistrationOutcome {
         if !is_fixed_hex(
             &node_id,
             ADDRESS_HEX_LENGTH,
@@ -587,13 +630,7 @@ impl Network {
             || listen_address.len()
                 > MAX_PEER_ADDRESS_LENGTH
         {
-            return false;
-        }
-
-        if self.peer_identities.len()
-            >= MAX_NETWORK_PEERS
-        {
-            return false;
+            return PeerRegistrationOutcome::InvalidIdentity;
         }
 
         if self
@@ -603,22 +640,56 @@ impl Network {
                 |peer| {
                     peer.node_id
                         == node_id
-                        || peer.listen_address
+                        && peer.listen_address
                             == listen_address
                 },
             )
         {
-            return false;
+            return PeerRegistrationOutcome::AlreadyRegistered;
+        }
+
+        if self
+            .peer_identities
+            .iter()
+            .any(
+                |peer| {
+                    peer.node_id
+                        == node_id
+                },
+            )
+        {
+            return PeerRegistrationOutcome::NodeIdConflict;
+        }
+
+        if self
+            .peer_identities
+            .iter()
+            .any(
+                |peer| {
+                    peer.listen_address
+                        == listen_address
+                },
+            )
+        {
+            return PeerRegistrationOutcome::ListenAddressConflict;
+        }
+
+        if self.peer_identities.len()
+            >= MAX_NETWORK_PEERS
+            || (!self.peers.contains(
+                &listen_address,
+            ) && self.peers.len()
+                >= MAX_NETWORK_PEERS)
+        {
+            return PeerRegistrationOutcome::PeerLimitReached;
         }
 
         if !self.peers.contains(
             &listen_address,
         ) {
-            if !self.add_peer(
+            self.peers.push(
                 listen_address.clone(),
-            ) {
-                return false;
-            }
+            );
         }
 
         self.peer_identities.push(
@@ -628,7 +699,7 @@ impl Network {
             },
         );
 
-        true
+        PeerRegistrationOutcome::Registered
     }
 
     pub fn has_peer_node_id(
@@ -751,9 +822,20 @@ impl Network {
         if !Self::message_within_limits(
             &message,
         ) {
-            println!(
-                "❌ Network mesajı reddedildi: Mesaj boyutu veya protokol limiti aşıldı"
-            );
+            if matches!(
+                &message,
+                NetworkMessage::Handshake {
+                    ..
+                }
+            ) {
+                println!(
+                    "❌ Handshake reddedildi: alan, imza, network, protocol veya timestamp geçersiz"
+                );
+            } else {
+                println!(
+                    "❌ Network mesajı reddedildi: Mesaj boyutu veya protokol limiti aşıldı"
+                );
+            }
 
             return;
         }
@@ -766,19 +848,56 @@ impl Network {
                 protocol_version,
                 ..
             } => {
-                let registered =
-                    self.add_peer_identity(
+                let registration =
+                    self.register_peer_identity(
                         node_id.clone(),
                         listen_address.clone(),
                     );
 
-                println!(
-                    "📥 Handshake alındı. Node: {} Network: {} Protocol: {} Kayıt: {}",
-                    node_id,
-                    network_id,
-                    protocol_version,
-                    registered
-                );
+                match registration {
+                    PeerRegistrationOutcome::Registered => {
+                        println!(
+                            "📥 Handshake alındı. Node: {} Network: {} Protocol: {} Peer kaydedildi",
+                            node_id,
+                            network_id,
+                            protocol_version
+                        );
+                    }
+
+                    PeerRegistrationOutcome::AlreadyRegistered => {
+                        println!(
+                            "📥 Handshake alındı. Node: {} Network: {} Protocol: {} Peer zaten kayıtlı",
+                            node_id,
+                            network_id,
+                            protocol_version
+                        );
+                    }
+
+                    PeerRegistrationOutcome::NodeIdConflict => {
+                        println!(
+                            "❌ Peer kaydı reddedildi: node kimliği farklı listen address ile kayıtlı"
+                        );
+                    }
+
+                    PeerRegistrationOutcome::ListenAddressConflict => {
+                        println!(
+                            "❌ Peer kaydı reddedildi: listen address farklı node kimliğiyle kayıtlı"
+                        );
+                    }
+
+                    PeerRegistrationOutcome::PeerLimitReached => {
+                        println!(
+                            "❌ Peer kaydı reddedildi: peer limiti dolu"
+                        );
+                    }
+
+                    PeerRegistrationOutcome::InvalidIdentity => {
+                        println!(
+                            "❌ Peer kaydı reddedildi: peer kimliği veya listen address geçersiz"
+                        );
+                    }
+                }
+
             }
 
             NetworkMessage::HandshakeAck {

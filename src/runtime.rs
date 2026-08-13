@@ -331,7 +331,15 @@ impl NodeRuntime {
         }
 
         loop {
-            let message = TcpTransport::read_message(&mut stream).await?;
+            let Some(message) =
+                TcpTransport::read_message_or_eof(
+                    &mut stream,
+                )
+                .await?
+            else {
+                return Ok(());
+            };
+
             if matches!(&message, NetworkMessage::ChainChunkResponse { .. }) {
                 return Err("Beklenmeyen chain chunk response reddedildi".into());
             }

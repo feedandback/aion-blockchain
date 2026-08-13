@@ -224,16 +224,46 @@ impl TcpTransport {
     pub async fn read_message(
         stream: &mut TcpStream,
     ) -> Result<NetworkMessage, String> {
+        Self::read_message_or_eof(
+            stream,
+        )
+        .await?
+        .ok_or_else(
+            || {
+                "Network bağlantısı mesaj beklenirken kapandı"
+                    .to_string()
+            },
+        )
+    }
+
+    pub async fn read_message_or_eof(
+        stream: &mut TcpStream,
+    ) -> Result<Option<NetworkMessage>, String> {
         let mut length_bytes =
             [0u8; 4];
 
-        timeout(
+        let frame_started = timeout(
             Duration::from_secs(
                 NETWORK_IO_TIMEOUT_SECONDS,
             ),
-            stream.read_exact(
-                &mut length_bytes,
-            ),
+            async {
+                let first_byte_count =
+                    stream.read(
+                        &mut length_bytes[..1],
+                    )
+                    .await?;
+
+                if first_byte_count == 0 {
+                    return Ok::<bool, std::io::Error>(false);
+                }
+
+                stream.read_exact(
+                    &mut length_bytes[1..],
+                )
+                .await?;
+
+                Ok(true)
+            },
         )
         .await
         .map_err(
@@ -250,6 +280,10 @@ impl TcpTransport {
                 )
             },
         )?;
+
+        if !frame_started {
+            return Ok(None);
+        }
 
         let payload_length =
             u32::from_be_bytes(
@@ -302,17 +336,20 @@ impl TcpTransport {
             },
         )?;
 
-        serde_json::from_slice(
-            &payload,
-        )
-        .map_err(
-            |error| {
-                format!(
-                    "Network mesajı JSON formatı geçersiz: {}",
-                    error
-                )
-            },
-        )
+        let message =
+            serde_json::from_slice(
+                &payload,
+            )
+            .map_err(
+                |error| {
+                    format!(
+                        "Network mesajı JSON formatı geçersiz: {}",
+                        error
+                    )
+                },
+            )?;
+
+        Ok(Some(message))
     }
 
     pub async fn run_listener(
@@ -530,17 +567,10 @@ impl TcpTransport {
                         .unwrap_or("")
                         .to_string();
 
-                    let mut validation_network =
-                        Network::new();
-
-                    validation_network.receive(
-                        handshake.clone(),
-                    );
-
                     let accepted =
-                        validation_network
-                            .identified_peer_count()
-                            == 1;
+                        Network::validate_handshake(
+                            &handshake,
+                        );
 
                     let handshake_ack =
                         Network::create_handshake_ack(
@@ -596,18 +626,22 @@ impl TcpTransport {
 
                     loop {
                         let message =
-                            match Self::read_message(
+                            match Self::read_message_or_eof(
                                 &mut stream,
                             )
                             .await
                             {
-                                Ok(message) => {
+                                Ok(Some(message)) => {
                                     message
+                                }
+
+                                Ok(None) => {
+                                    break;
                                 }
 
                                 Err(error) => {
                                     println!(
-                                        "🔌 Peer bağlantısı kapandı: {} ({})",
+                                        "❌ P2P mesaj okuma hatası: {} ({})",
                                         peer_address,
                                         error
                                     );
@@ -881,17 +915,10 @@ impl TcpTransport {
             .unwrap_or("")
             .to_string();
 
-        let mut validation_network =
-            Network::new();
-
-        validation_network.receive(
-            handshake.clone(),
-        );
-
         let accepted =
-            validation_network
-                .identified_peer_count()
-                == 1;
+            Network::validate_handshake(
+                &handshake,
+            );
 
         let handshake_ack =
             Network::create_handshake_ack(
