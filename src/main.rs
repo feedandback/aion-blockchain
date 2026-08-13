@@ -28,7 +28,7 @@ use crate::runtime::{
     VALIDATOR_PASSWORD_ENV,
 };
 use crate::storage::Storage;
-use crate::validator::ValidatorKeystore;
+use crate::validator::{ValidatorCandidateKeystore, ValidatorKeystore};
 use crate::wallet::Wallet;
 
 const WALLET_PASSWORD_ENV: &str =
@@ -43,6 +43,86 @@ async fn main() {
         Vec<String> =
         std::env::args()
             .collect();
+
+    if arguments.get(1).map(String::as_str)
+        == Some("validator")
+    {
+        if arguments.len() != 3 {
+            eprintln!(
+                "Kullanım: kybernetes validator generate-candidate | activate-candidate"
+            );
+            std::process::exit(1);
+        }
+
+        let password = match std::env::var(
+            VALIDATOR_PASSWORD_ENV,
+        ) {
+            Ok(password)
+                if !password.trim().is_empty() => password,
+            _ => {
+                eprintln!(
+                    "{} ortam değişkeni tanımlı olmalı",
+                    VALIDATOR_PASSWORD_ENV
+                );
+                std::process::exit(1);
+            }
+        };
+        let candidate_keystore =
+            ValidatorCandidateKeystore::configured();
+
+        match arguments[2].as_str() {
+            "generate-candidate" => {
+                match candidate_keystore.generate(&password) {
+                    Ok(address) => println!(
+                        "Candidate validator address: {}",
+                        address
+                    ),
+                    Err(error) => {
+                        eprintln!("Candidate validator üretilemedi: {error}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "activate-candidate" => {
+                let bootstrap = match canonical_bootstrap() {
+                    Ok(bootstrap) => bootstrap,
+                    Err(error) => {
+                        eprintln!("Canonical bootstrap oluşturulamadı: {error}");
+                        std::process::exit(1);
+                    }
+                };
+                match candidate_keystore.activate(
+                    &password,
+                    &bootstrap.consensus,
+                    &bootstrap.genesis_fingerprint,
+                ) {
+                    Ok(activation) => {
+                        println!(
+                            "Active validator address: {}",
+                            activation.address()
+                        );
+                        if !activation.candidate_removed() {
+                            eprintln!(
+                                "Uyarı: Active keystore oluşturuldu; candidate dosyası temizlenemedi ve şifreli olarak korundu"
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("Candidate validator aktive edilemedi: {error}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            _ => {
+                eprintln!(
+                    "Kullanım: kybernetes validator generate-candidate | activate-candidate"
+                );
+                std::process::exit(1);
+            }
+        }
+
+        return;
+    }
 
     if arguments.get(1).map(String::as_str)
         == Some("provision-validator")
@@ -1319,7 +1399,7 @@ async fn main() {
         != Some("demo")
     {
         eprintln!(
-            "Kullanım: kybernetes [node [listen_address] [peer...]] | provision-validator | demo | mevcut test CLI modu"
+            "Kullanım: kybernetes [node [listen_address] [peer...]] | validator generate-candidate | validator activate-candidate | provision-validator | demo | mevcut test CLI modu"
         );
         return;
     }
