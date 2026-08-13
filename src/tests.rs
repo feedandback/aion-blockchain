@@ -1,8 +1,14 @@
+use std::sync::OnceLock;
+
 use crate::chain::{Blockchain, Mempool};
 use crate::consensus::Consensus;
 use crate::core::{Block, Transaction};
+use crate::economy::Economy;
+use crate::network::NetworkMessage;
 use crate::node::Node;
-use crate::protocol::{GENESIS_PREVIOUS_HASH, GENESIS_TIMESTAMP, GENESIS_VALIDATOR};
+use crate::protocol::{
+    GENESIS_PREVIOUS_HASH, GENESIS_TIMESTAMP, GENESIS_VALIDATOR, MAX_SYNC_BLOCKS_PER_MESSAGE,
+};
 use crate::state::State;
 use crate::wallet::Wallet;
 
@@ -124,5 +130,222 @@ fn node_rejects_a_manipulated_block_without_changing_live_state() {
     assert_eq!(
         node.state.balance_of(&validator),
         original_validator_balance
+    );
+}
+
+fn build_remote_chain() -> Vec<Block> {
+    let validator = wallet("03");
+    let reward = Economy::new().block_reward;
+    let total_blocks = MAX_SYNC_BLOCKS_PER_MESSAGE * 2 + 1;
+    let mut chain = Vec::with_capacity(total_blocks);
+    chain.push(genesis_block());
+
+    for index in 1..total_blocks {
+        let block_index = u64::try_from(index).expect("test block index must fit u64");
+        let coinbase =
+            Transaction::new_coinbase(validator.address().to_string(), reward, block_index);
+        let mut block = Block::new(
+            block_index,
+            GENESIS_TIMESTAMP + block_index,
+            chain
+                .last()
+                .expect("remote chain must contain genesis")
+                .hash
+                .clone(),
+            validator.address().to_string(),
+            validator.public_key_hex(),
+            vec![coinbase],
+        );
+        block.sign(validator.sign(block.hash.as_bytes()));
+        chain.push(block);
+    }
+
+    chain
+}
+
+fn remote_chain(total_blocks: usize) -> Vec<Block> {
+    static REMOTE_CHAIN: OnceLock<Vec<Block>> = OnceLock::new();
+    let chain = REMOTE_CHAIN.get_or_init(build_remote_chain);
+    assert!(total_blocks <= chain.len());
+    chain[..total_blocks].to_vec()
+}
+
+fn chain_sync_node() -> Node {
+    let validator = wallet("03");
+    let mut state = State::new();
+    state.create_account(validator.address().to_string(), 0);
+    let mut consensus = Consensus::new();
+    assert!(consensus.add_validator(validator.address().to_string(), 1));
+
+    Node::new(Blockchain::new(genesis_block()), state, consensus)
+}
+
+#[test]
+fn node_accepts_a_valid_chain_chunk_response() {
+    let remote = remote_chain(2);
+    let remote_tip_hash = remote
+        .last()
+        .expect("remote chain must contain a tip")
+        .hash
+        .clone();
+    let mut node = chain_sync_node();
+
+    node.receive_message_without_persisting_for_test(NetworkMessage::ChainChunkResponse {
+        start_index: 0,
+        total_blocks: 2,
+        blocks: remote,
+    });
+
+    assert_eq!(node.blockchain.height(), 2);
+    assert_eq!(
+        node.blockchain
+            .chain
+            .last()
+            .expect("local chain must contain a tip")
+            .hash,
+        remote_tip_hash
+    );
+}
+
+#[test]
+fn node_rejects_a_chain_chunk_above_the_256_block_limit() {
+    let total_blocks = MAX_SYNC_BLOCKS_PER_MESSAGE + 1;
+    let remote = remote_chain(total_blocks);
+    let mut node = chain_sync_node();
+
+    let result = node.apply_chain_chunk_without_persisting_for_test(
+        0,
+        u64::try_from(total_blocks).expect("test block count must fit u64"),
+        remote,
+    );
+
+    assert!(result.is_err());
+    assert_eq!(node.blockchain.height(), 1);
+}
+
+#[test]
+fn node_rejects_a_chain_chunk_with_the_wrong_start_index() {
+    let total_blocks = MAX_SYNC_BLOCKS_PER_MESSAGE + 1;
+    let remote = remote_chain(total_blocks);
+    let mut node = chain_sync_node();
+
+    let first_result = node
+        .apply_chain_chunk_without_persisting_for_test(
+            0,
+            u64::try_from(total_blocks).expect("test block count must fit u64"),
+            remote[..MAX_SYNC_BLOCKS_PER_MESSAGE].to_vec(),
+        )
+        .expect("first chunk must be accepted");
+    assert_eq!(
+        first_result,
+        Some(u64::try_from(MAX_SYNC_BLOCKS_PER_MESSAGE).expect("test chunk size must fit u64"))
+    );
+
+    let result = node.apply_chain_chunk_without_persisting_for_test(
+        u64::try_from(MAX_SYNC_BLOCKS_PER_MESSAGE - 1).expect("test start index must fit u64"),
+        u64::try_from(total_blocks).expect("test block count must fit u64"),
+        remote[MAX_SYNC_BLOCKS_PER_MESSAGE..].to_vec(),
+    );
+
+    assert!(result.is_err());
+    assert_eq!(node.blockchain.height(), 1);
+}
+
+#[test]
+fn node_applies_a_chain_in_multiple_chunks() {
+    let total_blocks = MAX_SYNC_BLOCKS_PER_MESSAGE + 1;
+    let remote = remote_chain(total_blocks);
+    let remote_tip_hash = remote
+        .last()
+        .expect("remote chain must contain a tip")
+        .hash
+        .clone();
+    let mut node = chain_sync_node();
+
+    let next_index = node
+        .apply_chain_chunk_without_persisting_for_test(
+            0,
+            u64::try_from(total_blocks).expect("test block count must fit u64"),
+            remote[..MAX_SYNC_BLOCKS_PER_MESSAGE].to_vec(),
+        )
+        .expect("first chunk must be accepted");
+    assert_eq!(
+        next_index,
+        Some(u64::try_from(MAX_SYNC_BLOCKS_PER_MESSAGE).expect("test chunk size must fit u64"))
+    );
+
+    let completed = node
+        .apply_chain_chunk_without_persisting_for_test(
+            u64::try_from(MAX_SYNC_BLOCKS_PER_MESSAGE).expect("test start index must fit u64"),
+            u64::try_from(total_blocks).expect("test block count must fit u64"),
+            remote[MAX_SYNC_BLOCKS_PER_MESSAGE..].to_vec(),
+        )
+        .expect("final chunk must be accepted");
+
+    assert_eq!(completed, None);
+    assert_eq!(node.blockchain.height(), total_blocks);
+    assert_eq!(
+        node.blockchain
+            .chain
+            .last()
+            .expect("local chain must contain a tip")
+            .hash,
+        remote_tip_hash
+    );
+}
+
+#[test]
+fn node_rejects_a_chunk_containing_a_tampered_equal_length_chain() {
+    let mut remote = remote_chain(1);
+    remote[0].timestamp += 1;
+    assert!(!remote[0].is_hash_valid());
+    let mut node = chain_sync_node();
+
+    let result = node.apply_chain_chunk_without_persisting_for_test(0, 1, remote);
+
+    assert!(
+        result.is_err(),
+        "an equal-length remote chain must be validated before it is treated as synchronized"
+    );
+    assert_eq!(node.blockchain.height(), 1);
+}
+
+#[test]
+fn completed_sync_matches_the_remote_total_block_count() {
+    let total_blocks = MAX_SYNC_BLOCKS_PER_MESSAGE * 2 + 1;
+    let total_blocks_u64 = u64::try_from(total_blocks).expect("test block count must fit u64");
+    let remote = remote_chain(total_blocks);
+    let mut node = chain_sync_node();
+
+    let first = node
+        .apply_chain_chunk_without_persisting_for_test(
+            0,
+            total_blocks_u64,
+            remote[..MAX_SYNC_BLOCKS_PER_MESSAGE].to_vec(),
+        )
+        .expect("first chunk must be accepted");
+    assert_eq!(first, Some(256));
+
+    let second = node
+        .apply_chain_chunk_without_persisting_for_test(
+            256,
+            total_blocks_u64,
+            remote[256..512].to_vec(),
+        )
+        .expect("second chunk must be accepted");
+    assert_eq!(second, Some(512));
+
+    let completed = node
+        .apply_chain_chunk_without_persisting_for_test(
+            512,
+            total_blocks_u64,
+            remote[512..].to_vec(),
+        )
+        .expect("final chunk must be accepted");
+
+    assert_eq!(completed, None);
+    assert_eq!(
+        u64::try_from(node.blockchain.height()).expect("local height must fit u64"),
+        total_blocks_u64
     );
 }

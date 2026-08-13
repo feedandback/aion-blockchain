@@ -36,6 +36,10 @@ pub struct Node {
     // geçici uzak zincir tamponu.
     sync_buffer: Vec<Block>,
     sync_expected_total: Option<u64>,
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    skip_chain_sync_persistence_for_test: bool,
 }
 
 impl Node {
@@ -57,6 +61,8 @@ impl Node {
             genesis_economy,
             sync_buffer: Vec::new(),
             sync_expected_total: None,
+            #[cfg(test)]
+            skip_chain_sync_persistence_for_test: false,
         }
     }
 
@@ -1089,6 +1095,52 @@ impl Node {
         )
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn apply_chain_chunk_without_persisting_for_test(
+        &mut self,
+        start_index: u64,
+        total_blocks: u64,
+        blocks: Vec<Block>,
+    ) -> Result<Option<u64>, String> {
+        let previous_setting =
+            self.skip_chain_sync_persistence_for_test;
+
+        self.skip_chain_sync_persistence_for_test =
+            true;
+
+        let result = self.apply_chain_chunk(
+            start_index,
+            total_blocks,
+            blocks,
+        );
+
+        self.skip_chain_sync_persistence_for_test =
+            previous_setting;
+
+        result
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn receive_message_without_persisting_for_test(
+        &mut self,
+        message: NetworkMessage,
+    ) {
+        let previous_setting =
+            self.skip_chain_sync_persistence_for_test;
+
+        self.skip_chain_sync_persistence_for_test =
+            true;
+
+        self.receive_message(
+            message,
+        );
+
+        self.skip_chain_sync_persistence_for_test =
+            previous_setting;
+    }
+
     // ==========================
     // MEMPOOL TEMİZLE
     // ==========================
@@ -1418,6 +1470,52 @@ impl Node {
             if remote_tip_hash
                 == local_tip_hash
             {
+                let remote_blockchain =
+                    Blockchain {
+                        chain,
+                        economy: self
+                            .genesis_economy
+                            .clone(),
+                    };
+
+                if !remote_blockchain
+                    .is_valid()
+                {
+                    return Err(
+                        "Eşit uzunluktaki blockchain geçersiz"
+                            .into(),
+                    );
+                }
+
+                let local_genesis_hash =
+                    self.blockchain
+                        .chain
+                        .first()
+                        .ok_or(
+                            "Yerel genesis bulunamadı",
+                        )?
+                        .hash
+                        .as_str();
+
+                let remote_genesis_hash =
+                    remote_blockchain
+                        .chain
+                        .first()
+                        .ok_or(
+                            "Gelen genesis bulunamadı",
+                        )?
+                        .hash
+                        .as_str();
+
+                if remote_genesis_hash
+                    != local_genesis_hash
+                {
+                    return Err(
+                        "Genesis blokları uyuşmuyor"
+                            .into(),
+                    );
+                }
+
                 return Ok(());
             }
 
@@ -1521,6 +1619,7 @@ impl Node {
         // KALICI KAYIT + ATOMİK COMMIT
         // ==========================
 
+        #[cfg(not(test))]
         Storage::save_blockchain(
             &rebuilt_blockchain
                 .chain,
@@ -1533,6 +1632,22 @@ impl Node {
                 )
             },
         )?;
+
+        #[cfg(test)]
+        if !self.skip_chain_sync_persistence_for_test {
+            Storage::save_blockchain(
+                &rebuilt_blockchain
+                    .chain,
+            )
+            .map_err(
+                |error| {
+                    format!(
+                        "Senkronize blockchain kalıcı kayda yazılamadı: {}",
+                        error
+                    )
+                },
+            )?;
+        }
 
         self.blockchain =
             rebuilt_blockchain;
