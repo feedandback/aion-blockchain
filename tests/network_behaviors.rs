@@ -4,6 +4,8 @@ use kybernetes::wallet::Wallet;
 
 const PRIVATE_KEY: &str = "0101010101010101010101010101010101010101010101010101010101010101";
 const LISTEN_ADDRESS: &str = "127.0.0.1:41001";
+const LEGACY_NETWORK_ID: &str = "kybernetes-mainnet-v1";
+const LEGACY_NETWORK_PROTOCOL_VERSION: u32 = 1;
 
 fn wallet() -> Wallet {
     Wallet::from_private_key_hex(PRIVATE_KEY).expect("test private key must be valid")
@@ -58,6 +60,13 @@ fn assert_handshake_rejected(message: NetworkMessage) {
 }
 
 #[test]
+fn network_uses_the_v2_consensus_identity() {
+    assert_eq!(NETWORK_ID, "kybernetes-mainnet-v2");
+    assert_eq!(NETWORK_PROTOCOL_VERSION, 2);
+    assert_eq!(Network::protocol_version(), 2);
+}
+
+#[test]
 fn network_accepts_a_valid_signed_handshake() {
     let wallet = wallet();
     let challenge = "ab".repeat(32);
@@ -79,12 +88,12 @@ fn network_accepts_a_valid_signed_handshake() {
 }
 
 #[test]
-fn network_rejects_a_handshake_for_the_wrong_network_id() {
+fn network_rejects_a_handshake_for_the_v1_network_id() {
     let wallet = wallet();
     let challenge = "bc".repeat(32);
     let message = signed_handshake(
         &wallet,
-        "kybernetes-testnet-v1",
+        LEGACY_NETWORK_ID,
         NETWORK_PROTOCOL_VERSION,
         Network::current_timestamp(),
         &challenge,
@@ -94,16 +103,13 @@ fn network_rejects_a_handshake_for_the_wrong_network_id() {
 }
 
 #[test]
-fn network_rejects_a_handshake_for_the_wrong_protocol_version() {
+fn network_rejects_a_handshake_for_the_v1_protocol_version() {
     let wallet = wallet();
     let challenge = "cd".repeat(32);
-    let wrong_version = NETWORK_PROTOCOL_VERSION
-        .checked_add(1)
-        .expect("test protocol version must not overflow");
     let message = signed_handshake(
         &wallet,
         NETWORK_ID,
-        wrong_version,
+        LEGACY_NETWORK_PROTOCOL_VERSION,
         Network::current_timestamp(),
         &challenge,
     );

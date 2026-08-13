@@ -12,12 +12,18 @@ pub struct Economy {
     // Minimum transaction fee
     pub minimum_fee: u64,
 
+    // Network fee'lerinden biriken Liquidity Reserve
+    pub liquidity_reserve: u64,
+
     // Fee dağılımı
     #[allow(dead_code)]
     pub validator_fee_percent: u64,
 
+    pub liquidity_fee_percent: u64,
+
     pub treasury_fee_percent: u64,
 
+    #[allow(dead_code)]
     pub burn_fee_percent: u64,
 }
 
@@ -34,14 +40,18 @@ impl Economy {
             block_reward: 10 * 1_000_000,
 
             // Minimum fee
-            // 0.001 KBN
-            minimum_fee: 1_000,
+            // 10 microKBN
+            minimum_fee: 10,
 
-            validator_fee_percent: 70,
+            liquidity_reserve: 0,
 
-            treasury_fee_percent: 20,
+            validator_fee_percent: 15,
 
-            burn_fee_percent: 10,
+            liquidity_fee_percent: 80,
+
+            treasury_fee_percent: 5,
+
+            burn_fee_percent: 0,
         }
     }
 
@@ -54,7 +64,7 @@ impl Economy {
         amount: u64,
     ) -> u64 {
         let percentage_fee =
-            amount / 1000;
+            amount / 100_000;
 
         percentage_fee.max(
             self.minimum_fee,
@@ -80,7 +90,19 @@ impl Economy {
     pub fn distribute_fee(
         &self,
         fee: u64,
-    ) -> (u64, u64, u64) {
+    ) -> (u64, u64, u64, u64) {
+        let liquidity =
+            u64::try_from(
+                u128::from(fee)
+                    * u128::from(
+                        self.liquidity_fee_percent,
+                    )
+                    / 100,
+            )
+            .expect(
+                "Liquidity Reserve fee u64 aralığını aşıyor",
+            );
+
         let treasury =
             u64::try_from(
                 u128::from(fee)
@@ -93,38 +115,50 @@ impl Economy {
                 "Treasury fee u64 aralığını aşıyor",
             );
 
-        let burn =
-            u64::try_from(
-                u128::from(fee)
-                    * u128::from(
-                        self.burn_fee_percent,
-                    )
-                    / 100,
-            )
-            .expect(
-                "Burn fee u64 aralığını aşıyor",
-            );
+        let burn = 0;
 
         let validator =
             fee.checked_sub(
-                treasury,
+                liquidity,
             )
             .and_then(
                 |remaining| {
                     remaining.checked_sub(
-                        burn,
+                        treasury,
                     )
                 },
             )
             .expect(
-                "Treasury ve burn payları toplam fee'yi aşıyor",
+                "Liquidity Reserve ve treasury payları toplam fee'yi aşıyor",
             );
 
         (
             validator,
+            liquidity,
             treasury,
             burn,
         )
+    }
+
+    pub fn add_liquidity_reserve(
+        &mut self,
+        amount: u64,
+    ) -> Result<(), String> {
+        self.liquidity_reserve =
+            self.liquidity_reserve
+                .checked_add(amount)
+                .ok_or(
+                    "Liquidity Reserve overflow",
+                )?;
+
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn liquidity_reserve(
+        &self,
+    ) -> u64 {
+        self.liquidity_reserve
     }
 
     // ==========================

@@ -13,7 +13,7 @@ const PRIVATE_KEY_THREE: &str = "03030303030303030303030303030303030303030303030
 const PUBLIC_KEY_ONE: &str = "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c";
 const ADDRESS_ONE: &str = "34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e";
 const ADDRESS_TWO: &str = "6a3803d5f059902a1c6dafbc9ba4729212f7caac08634cc3ae76b27529f03827";
-const TRANSACTION_ID: &str = "e6032174544abb55e3223a6e5a692cd0026023cb64e35903885af13f77fedc1f";
+const TRANSACTION_ID: &str = "ec830f7529f3a6a9b7d21d5503e2fb55df286498dccce3ddf2f91757c30c0c58";
 const WALLET_SIGNATURE: &str = "644dd46aeec3e80c0db0d40bc1bcff5d140e19228354b3da66937b29130484ae9c8d38e2e393c5308743cf5d73d89d94a83cf3c7f57e84056f93f0c11bd72b0f";
 
 fn wallet(private_key: &str) -> Wallet {
@@ -83,7 +83,7 @@ fn transaction_creation_has_a_stable_id_and_detects_payload_changes() {
         sender.public_key_hex(),
         recipient.address().to_string(),
         1_000_000,
-        1_000,
+        10,
         0,
     );
 
@@ -133,7 +133,7 @@ fn node_accepts_the_next_valid_nonce() {
     let sender = wallet(PRIVATE_KEY_ONE);
     let recipient = wallet(PRIVATE_KEY_TWO);
     let mut node = node_with_balance(&sender, 10_000);
-    let transaction = signed_transaction(&sender, &recipient, 3_000, 1_000, 0);
+    let transaction = signed_transaction(&sender, &recipient, 3_000, 10, 0);
 
     assert!(node.add_transaction(transaction));
     assert_eq!(node.mempool.len(), 1);
@@ -144,7 +144,7 @@ fn node_rejects_an_invalid_nonce() {
     let sender = wallet(PRIVATE_KEY_ONE);
     let recipient = wallet(PRIVATE_KEY_TWO);
     let mut node = node_with_balance(&sender, 10_000);
-    let transaction = signed_transaction(&sender, &recipient, 3_000, 1_000, 1);
+    let transaction = signed_transaction(&sender, &recipient, 3_000, 10, 1);
 
     assert!(!node.add_transaction(transaction));
     assert!(node.mempool.is_empty());
@@ -156,12 +156,12 @@ fn node_rejects_an_invalid_nonce() {
 fn node_rejects_a_transaction_with_insufficient_balance() {
     let sender = wallet(PRIVATE_KEY_ONE);
     let recipient = wallet(PRIVATE_KEY_TWO);
-    let mut node = node_with_balance(&sender, 3_999);
-    let transaction = signed_transaction(&sender, &recipient, 3_000, 1_000, 0);
+    let mut node = node_with_balance(&sender, 3_009);
+    let transaction = signed_transaction(&sender, &recipient, 3_000, 10, 0);
 
     assert!(!node.add_transaction(transaction));
     assert!(node.mempool.is_empty());
-    assert_eq!(node.state.balance_of(sender.address()), 3_999);
+    assert_eq!(node.state.balance_of(sender.address()), 3_009);
     assert_eq!(node.state.nonce_of(sender.address()), 0);
 }
 
@@ -195,7 +195,7 @@ fn block_hash_and_previous_hash_are_validated() {
 fn mempool_accepts_a_valid_signed_transaction_once() {
     let sender = wallet(PRIVATE_KEY_ONE);
     let recipient = wallet(PRIVATE_KEY_TWO);
-    let transaction = signed_transaction(&sender, &recipient, 1_000_000, 1_000, 0);
+    let transaction = signed_transaction(&sender, &recipient, 1_000_000, 10, 0);
     let mut mempool = Mempool::new();
 
     assert!(mempool.add_transaction(transaction.clone()));
@@ -213,10 +213,10 @@ fn mempool_rejects_unsigned_and_tampered_transactions() {
         sender.public_key_hex(),
         recipient.address().to_string(),
         1_000_000,
-        1_000,
+        10,
         0,
     );
-    let mut tampered = signed_transaction(&sender, &recipient, 1_000_000, 1_000, 0);
+    let mut tampered = signed_transaction(&sender, &recipient, 1_000_000, 10, 0);
     tampered.amount += 1;
 
     let mut mempool = Mempool::new();
@@ -229,7 +229,7 @@ fn mempool_rejects_unsigned_and_tampered_transactions() {
 fn state_applies_balance_and_nonce_changes() {
     let sender = wallet(PRIVATE_KEY_ONE);
     let recipient = wallet(PRIVATE_KEY_TWO);
-    let transaction = signed_transaction(&sender, &recipient, 3_000, 1_000, 0);
+    let transaction = signed_transaction(&sender, &recipient, 3_000, 10, 0);
     let mut state = State::new();
     state.create_account(sender.address().to_string(), 10_000);
     state.create_account(recipient.address().to_string(), 500);
@@ -238,22 +238,26 @@ fn state_applies_balance_and_nonce_changes() {
         .apply_transaction(&transaction)
         .expect("valid state transition must succeed");
 
-    assert_eq!(state.balance_of(sender.address()), 6_000);
+    assert_eq!(state.balance_of(sender.address()), 6_990);
     assert_eq!(state.balance_of(recipient.address()), 3_500);
     assert_eq!(state.nonce_of(sender.address()), 1);
 }
 
 #[test]
-fn fee_treasury_and_burn_calculations_match_protocol_percentages() {
-    let economy = Economy::new();
-    assert_eq!(economy.calculate_fee(1), 1_000);
-    assert_eq!(economy.calculate_fee(999_999), 1_000);
-    assert_eq!(economy.calculate_fee(2_500_000), 2_500);
-    assert!(economy.validate_fee(2_500_000, 2_500));
-    assert!(!economy.validate_fee(2_500_000, 2_499));
+fn fee_liquidity_treasury_and_burn_match_protocol_percentages() {
+    let mut economy = Economy::new();
+    assert_eq!(economy.calculate_fee(1), 10);
+    assert_eq!(economy.calculate_fee(999_999), 10);
+    assert_eq!(economy.calculate_fee(2_500_000), 25);
+    assert!(economy.validate_fee(2_500_000, 25));
+    assert!(!economy.validate_fee(2_500_000, 24));
 
-    let (validator_fee, treasury_fee, burn_fee) = economy.distribute_fee(1_000);
-    assert_eq!((validator_fee, treasury_fee, burn_fee), (700, 200, 100));
+    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) =
+        economy.distribute_fee(1_000);
+    assert_eq!(
+        (validator_fee, liquidity_fee, treasury_fee, burn_fee),
+        (150, 800, 50, 0)
+    );
 
     let mut state = State::new();
     state.create_account("validator".to_string(), 0);
@@ -264,24 +268,167 @@ fn fee_treasury_and_burn_calculations_match_protocol_percentages() {
         .add_treasury(treasury_fee)
         .expect("treasury fee must fit");
     state.burn(burn_fee).expect("burn fee must fit");
+    economy
+        .add_liquidity_reserve(liquidity_fee)
+        .expect("liquidity reserve fee must fit");
 
-    assert_eq!(state.balance_of("validator"), 700);
-    assert_eq!(state.treasury(), 200);
-    assert_eq!(state.burned(), 100);
+    assert_eq!(state.balance_of("validator"), 150);
+    assert_eq!(economy.liquidity_reserve(), 800);
+    assert_eq!(state.treasury(), 50);
+    assert_eq!(state.burned(), 0);
 }
 
 #[test]
 fn fee_distribution_preserves_every_charged_unit() {
     let economy = Economy::new();
-    let fee = economy.calculate_fee(1_001_000);
-    let (validator_fee, treasury_fee, burn_fee) = economy.distribute_fee(fee);
+    let fee = economy.calculate_fee(100_100_000);
+    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) =
+        economy.distribute_fee(fee);
 
     assert_eq!(fee, 1_001);
     assert_eq!(
-        validator_fee + treasury_fee + burn_fee,
+        validator_fee + liquidity_fee + treasury_fee + burn_fee,
         fee,
         "fee distribution must not create or lose microKBN"
     );
+}
+
+#[test]
+fn fee_never_falls_below_ten_micro_kbn() {
+    let economy = Economy::new();
+
+    for amount in [0, 1, 999_999, 1_000_000] {
+        assert_eq!(economy.calculate_fee(amount), 10);
+    }
+}
+
+#[test]
+fn fee_uses_one_part_per_hundred_thousand() {
+    let economy = Economy::new();
+
+    assert_eq!(economy.calculate_fee(2_500_000), 25);
+    assert_eq!(economy.calculate_fee(100_000_000), 1_000);
+}
+
+#[test]
+fn liquidity_reserve_receives_eighty_percent_of_fees() {
+    let economy = Economy::new();
+    let (_, liquidity_fee, _, _) = economy.distribute_fee(1_000);
+
+    assert_eq!(economy.liquidity_fee_percent, 80);
+    assert_eq!(liquidity_fee, 800);
+}
+
+#[test]
+fn treasury_receives_five_percent_of_fees() {
+    let economy = Economy::new();
+    let (_, _, treasury_fee, _) = economy.distribute_fee(1_000);
+
+    assert_eq!(economy.treasury_fee_percent, 5);
+    assert_eq!(treasury_fee, 50);
+}
+
+#[test]
+fn validator_receives_the_fee_distribution_remainder() {
+    let economy = Economy::new();
+    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) =
+        economy.distribute_fee(1_001);
+
+    assert_eq!(economy.validator_fee_percent, 15);
+    assert_eq!(liquidity_fee, 800);
+    assert_eq!(treasury_fee, 50);
+    assert_eq!(validator_fee, 151);
+    assert_eq!(burn_fee, 0);
+}
+
+#[test]
+fn fee_distribution_never_burns_kbn() {
+    let economy = Economy::new();
+
+    for fee in [10, 1_000, 1_001, u64::MAX] {
+        let (_, _, _, burn_fee) = economy.distribute_fee(fee);
+        assert_eq!(burn_fee, 0);
+    }
+}
+
+#[test]
+fn fee_distribution_never_loses_a_micro_kbn() {
+    let economy = Economy::new();
+
+    for fee in [10, 11, 19, 20, 21, 99, 100, 101, 1_001, u64::MAX] {
+        let (validator_fee, liquidity_fee, treasury_fee, burn_fee) =
+            economy.distribute_fee(fee);
+        let distributed = u128::from(validator_fee)
+            + u128::from(liquidity_fee)
+            + u128::from(treasury_fee)
+            + u128::from(burn_fee);
+
+        assert_eq!(distributed, u128::from(fee));
+    }
+}
+
+#[test]
+fn tiny_transfer_pays_the_minimum_fee_without_underflow() {
+    let sender = wallet(PRIVATE_KEY_ONE);
+    let recipient = wallet(PRIVATE_KEY_TWO);
+    let economy = Economy::new();
+    let fee = economy.calculate_fee(1);
+    let transaction = signed_transaction(&sender, &recipient, 1, fee, 0);
+    let mut state = State::new();
+    state.create_account(sender.address().to_string(), 11);
+    state.create_account(recipient.address().to_string(), 0);
+
+    state
+        .apply_transaction(&transaction)
+        .expect("the smallest funded transfer must apply");
+
+    assert_eq!(fee, 10);
+    assert_eq!(state.balance_of(sender.address()), 0);
+    assert_eq!(state.balance_of(recipient.address()), 1);
+    assert_eq!(state.nonce_of(sender.address()), 1);
+}
+
+#[test]
+fn large_transfer_fee_and_distribution_do_not_overflow() {
+    let sender = wallet(PRIVATE_KEY_ONE);
+    let recipient = wallet(PRIVATE_KEY_TWO);
+    let economy = Economy::new();
+    let large_amount = u64::MAX / 2;
+    let large_fee = economy.calculate_fee(large_amount);
+    let transaction = signed_transaction(&sender, &recipient, large_amount, large_fee, 0);
+    let mut state = State::new();
+    state.create_account(sender.address().to_string(), u64::MAX);
+    state.create_account(recipient.address().to_string(), 0);
+
+    state
+        .apply_transaction(&transaction)
+        .expect("a funded large transfer must not overflow");
+
+    assert_eq!(state.balance_of(recipient.address()), large_amount);
+    assert_eq!(
+        state.balance_of(sender.address()),
+        u64::MAX - large_amount - large_fee
+    );
+
+    let fee = economy.calculate_fee(u64::MAX);
+    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) =
+        economy.distribute_fee(fee);
+
+    assert_eq!(fee, 184_467_440_737_095);
+    assert_eq!(
+        u128::from(validator_fee)
+            + u128::from(liquidity_fee)
+            + u128::from(treasury_fee)
+            + u128::from(burn_fee),
+        u128::from(fee)
+    );
+
+    let (max_validator, max_liquidity, max_treasury, max_burn) =
+        economy.distribute_fee(u64::MAX);
+    assert_eq!(max_validator, 2_767_011_611_056_432_743);
+    assert_eq!(max_liquidity, 14_757_395_258_967_641_292);
+    assert_eq!(max_treasury, 922_337_203_685_477_580);
+    assert_eq!(max_burn, 0);
 }
 
 #[test]

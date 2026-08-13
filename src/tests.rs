@@ -14,7 +14,7 @@ use crate::wallet::Wallet;
 
 const INITIAL_SUPPLY: u64 = 20_000_000;
 const TRANSFER_AMOUNT: u64 = 1_000_000;
-const TRANSFER_FEE: u64 = 1_000;
+const TRANSFER_FEE: u64 = 10;
 
 fn wallet(byte: &str) -> Wallet {
     Wallet::from_private_key_hex(&byte.repeat(32)).expect("test private key must be valid")
@@ -39,7 +39,7 @@ fn initial_state(sender: &Wallet, recipient: &Wallet, validator: &Wallet) -> Sta
     state
 }
 
-fn node_and_valid_block() -> (Node, Block, String, String, String) {
+fn node_and_valid_block() -> (Node, Block, String, String, String, u64) {
     let sender = wallet("01");
     let recipient = wallet("02");
     let validator = wallet("03");
@@ -73,6 +73,9 @@ fn node_and_valid_block() -> (Node, Block, String, String, String) {
         )
         .expect("fixture block must be produced");
 
+    let producer_liquidity_reserve =
+        producer_blockchain.economy.liquidity_reserve();
+
     let mut receiver_blockchain = Blockchain::new(genesis);
     receiver_blockchain
         .economy
@@ -90,29 +93,33 @@ fn node_and_valid_block() -> (Node, Block, String, String, String) {
         sender.address().to_string(),
         recipient.address().to_string(),
         validator.address().to_string(),
+        producer_liquidity_reserve,
     )
 }
 
 #[test]
 fn node_accepts_a_valid_block_without_persisting_it() {
-    let (node, block, sender, recipient, validator) = node_and_valid_block();
+    let (node, block, sender, recipient, validator, producer_liquidity_reserve) =
+        node_and_valid_block();
 
     let (accepted_blockchain, accepted_state) = node
         .validate_and_apply_block_for_test(block)
         .expect("a valid block must pass the node validation pipeline");
 
     assert_eq!(accepted_blockchain.height(), 2);
-    assert_eq!(accepted_state.balance_of(&sender), 18_999_000);
+    assert_eq!(accepted_state.balance_of(&sender), 18_999_990);
     assert_eq!(accepted_state.balance_of(&recipient), 1_000_000);
-    assert_eq!(accepted_state.balance_of(&validator), 10_000_700);
-    assert_eq!(accepted_state.treasury(), 200);
-    assert_eq!(accepted_state.burned(), 100);
-    assert_eq!(accepted_blockchain.economy.supply(), 29_999_900);
+    assert_eq!(accepted_state.balance_of(&validator), 10_000_002);
+    assert_eq!(accepted_state.treasury(), 0);
+    assert_eq!(accepted_state.burned(), 0);
+    assert_eq!(accepted_blockchain.economy.supply(), 30_000_000);
+    assert_eq!(producer_liquidity_reserve, 8);
+    assert_eq!(accepted_blockchain.economy.liquidity_reserve(), 8);
 }
 
 #[test]
 fn node_rejects_a_manipulated_block_without_changing_live_state() {
-    let (node, mut block, sender, recipient, validator) = node_and_valid_block();
+    let (node, mut block, sender, recipient, validator, _) = node_and_valid_block();
     let original_height = node.blockchain.height();
     let original_sender_balance = node.state.balance_of(&sender);
     let original_recipient_balance = node.state.balance_of(&recipient);
@@ -130,6 +137,24 @@ fn node_rejects_a_manipulated_block_without_changing_live_state() {
     assert_eq!(
         node.state.balance_of(&validator),
         original_validator_balance
+    );
+}
+
+#[test]
+fn chain_replay_rebuilds_the_same_liquidity_reserve() {
+    let (mut node, block, _, _, _, producer_liquidity_reserve) = node_and_valid_block();
+    let remote_chain = vec![genesis_block(), block];
+
+    let completed = node
+        .apply_chain_chunk_without_persisting_for_test(0, 2, remote_chain)
+        .expect("a valid remote chain must replay successfully");
+
+    assert_eq!(completed, None);
+    assert_eq!(node.blockchain.height(), 2);
+    assert_eq!(producer_liquidity_reserve, 8);
+    assert_eq!(
+        node.blockchain.economy.liquidity_reserve(),
+        producer_liquidity_reserve
     );
 }
 

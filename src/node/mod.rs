@@ -821,6 +821,7 @@ impl Node {
                 .clone();
 
         let mut validator_fee_total = 0u64;
+        let mut liquidity_fee_total = 0u64;
         let mut treasury_fee_total = 0u64;
         let mut burn_fee_total = 0u64;
 
@@ -967,6 +968,7 @@ impl Node {
 
             let (
                 validator_fee,
+                liquidity_fee,
                 treasury_fee,
                 burn_fee,
             ) = rebuilt_economy
@@ -981,6 +983,15 @@ impl Node {
                     )
                     .ok_or(
                         "Validator fee overflow",
+                    )?;
+
+            liquidity_fee_total =
+                liquidity_fee_total
+                    .checked_add(
+                        liquidity_fee,
+                    )
+                    .ok_or(
+                        "Liquidity Reserve fee overflow",
                     )?;
 
             treasury_fee_total =
@@ -1039,6 +1050,11 @@ impl Node {
         rebuilt_state.add_treasury(
             treasury_fee_total,
         )?;
+
+        rebuilt_economy
+            .add_liquidity_reserve(
+                liquidity_fee_total,
+            )?;
 
         // ==========================
         // BURN

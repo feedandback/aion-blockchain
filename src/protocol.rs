@@ -1,4 +1,4 @@
-// Kybernetes V1 merkezi protokol sabitleri.
+// Kybernetes V2 merkezi protokol sabitleri.
 //
 // Konsensüs açısından kritik limit ve format değerleri
 // tek noktadan yönetilir. Node, Blockchain ve Mempool
@@ -16,11 +16,11 @@ pub const MAX_PEER_ADDRESS_LENGTH: usize = 256;
 // Kybernetes ağ kimliği.
 // Farklı network_id kullanan node'lar birbirine bağlanmamalıdır.
 #[allow(dead_code)]
-pub const NETWORK_ID: &str = "kybernetes-mainnet-v1";
+pub const NETWORK_ID: &str = "kybernetes-mainnet-v2";
 
 // P2P mesaj protokolü sürümü.
 #[allow(dead_code)]
-pub const NETWORK_PROTOCOL_VERSION: u32 = 1;
+pub const NETWORK_PROTOCOL_VERSION: u32 = 2;
 
 // TCP bağlantı ve mesaj okuma/yazma işlemleri
 // sonsuza kadar bekleyemez.

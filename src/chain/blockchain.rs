@@ -424,6 +424,9 @@ impl Blockchain {
         let mut validator_fee_total =
             0u64;
 
+        let mut liquidity_fee_total =
+            0u64;
+
         let mut treasury_fee_total =
             0u64;
 
@@ -435,6 +438,7 @@ impl Blockchain {
         {
             let (
                 validator_fee,
+                liquidity_fee,
                 treasury_fee,
                 burn_fee,
             ) = candidate_economy
@@ -449,6 +453,15 @@ impl Blockchain {
                     )
                     .ok_or(
                         "Validator fee overflow",
+                    )?;
+
+            liquidity_fee_total =
+                liquidity_fee_total
+                    .checked_add(
+                        liquidity_fee,
+                    )
+                    .ok_or(
+                        "Liquidity Reserve fee overflow",
                     )?;
 
             treasury_fee_total =
@@ -506,6 +519,15 @@ impl Blockchain {
         candidate_state
             .add_treasury(
                 treasury_fee_total,
+            )?;
+
+        // ==========================
+        // LIQUIDITY RESERVE
+        // ==========================
+
+        candidate_economy
+            .add_liquidity_reserve(
+                liquidity_fee_total,
             )?;
 
         // ==========================
