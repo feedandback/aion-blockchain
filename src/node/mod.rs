@@ -421,41 +421,62 @@ impl Node {
     // TRANSACTION EKLE
     // ==========================
 
+    fn insert_transaction_into_mempool(
+        &mut self,
+        transaction: Transaction,
+    ) -> Result<(), String> {
+        self.validate_transaction_for_mempool(
+            &transaction,
+            &self.state,
+            &self.blockchain.economy,
+            &self.mempool,
+        )?;
+
+        if !self
+            .mempool
+            .add_transaction(transaction)
+        {
+            return Err(
+                "Transaction mempool'a eklenemedi: limit veya duplicate"
+                    .into(),
+            );
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn receive_transaction_with_result(
+        &mut self,
+        transaction: Transaction,
+    ) -> Result<(), String> {
+        self.insert_transaction_into_mempool(
+            transaction,
+        )
+    }
+
     pub fn add_transaction(
         &mut self,
         transaction: Transaction,
     ) -> bool {
-        if let Err(error) =
-            self.validate_transaction_for_mempool(
-                &transaction,
-                &self.state,
-                &self.blockchain.economy,
-                &self.mempool,
-            )
-        {
-            println!(
-                "❌ Transaction reddedildi: {}",
-                error
-            );
-
-            return false;
-        }
-
-        let added =
-            self.mempool
-                .add_transaction(
-                    transaction.clone(),
+        match self.insert_transaction_into_mempool(
+            transaction.clone(),
+        ) {
+            Ok(()) => {
+                self.network.broadcast(
+                    NetworkMessage::Transaction(
+                        transaction,
+                    ),
                 );
-
-        if added {
-            self.network.broadcast(
-                NetworkMessage::Transaction(
-                    transaction,
-                ),
-            );
+                true
+            }
+            Err(error) => {
+                println!(
+                    "❌ Transaction reddedildi: {}",
+                    error
+                );
+                false
+            }
         }
-
-        added
     }
 
     // ==========================
@@ -486,22 +507,12 @@ impl Node {
             NetworkMessage::Transaction(
                 transaction,
             ) => {
-                match self.validate_transaction_for_mempool(
-                    &transaction,
-                    &self.state,
-                    &self.blockchain.economy,
-                    &self.mempool,
+                match self.insert_transaction_into_mempool(
+                    transaction,
                 ) {
                     Ok(()) => {
-                        let added =
-                            self.mempool
-                                .add_transaction(
-                                    transaction,
-                                );
-
                         println!(
-                            "📥 Network transaction doğrulandı. Mempool'a eklendi: {}",
-                            added
+                            "📥 Network transaction doğrulandı. Mempool'a eklendi"
                         );
                     }
 

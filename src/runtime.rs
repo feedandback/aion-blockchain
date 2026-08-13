@@ -8,7 +8,7 @@ use tokio::sync::{Mutex, Semaphore};
 use crate::bootstrap::canonical_bootstrap;
 use crate::core::Block;
 use crate::network::tcp::TcpTransport;
-use crate::network::{Network, NetworkMessage};
+use crate::network::{Network, NetworkMessage, ONE_SHOT_CLIENT_LISTEN_ADDRESS};
 use crate::node::Node;
 use crate::protocol::{MAX_CONCURRENT_NETWORK_CONNECTIONS, MAX_SYNC_BLOCKS_PER_MESSAGE};
 use crate::storage::Storage;
@@ -160,6 +160,14 @@ impl NodeRuntime {
             listen_address,
             peers,
         } = config;
+        if listen_address
+            == ONE_SHOT_CLIENT_LISTEN_ADDRESS
+        {
+            return Err(
+                "Production node listener one-shot client address kullanamaz"
+                    .into(),
+            );
+        }
         let listener = TcpTransport::bind(&listen_address).await?;
         let p2p_identity = Arc::new(Wallet::new());
         let runtime = Arc::new(Mutex::new(self));
@@ -695,17 +703,41 @@ impl NodeRuntime {
                 return Err("Beklenmeyen chain chunk response reddedildi".into());
             }
             NetworkMessage::Transaction(transaction) => {
-                let previous_mempool_size = self.node.mempool.transactions.len();
-                self.node
-                    .receive_message(NetworkMessage::Transaction(transaction.clone()));
-                if self.node.mempool.transactions.len() > previous_mempool_size {
-                    outcome
-                        .actions
-                        .push(RuntimeAction::Broadcast(NetworkMessage::Transaction(
-                            transaction,
-                        )));
+                let transaction_id = if crate::protocol::is_fixed_hex(
+                    &transaction.id,
+                    crate::protocol::HASH_HEX_LENGTH,
+                ) {
+                    transaction.id.clone()
+                } else {
+                    "<invalid-id>".to_string()
+                };
 
-                    self.append_pending_block_action(&mut outcome);
+                match self
+                    .node
+                    .receive_transaction_with_result(
+                        transaction.clone(),
+                    )
+                {
+                    Ok(()) => {
+                        println!(
+                            "Transaction accepted: {transaction_id}"
+                        );
+                        outcome.actions.push(
+                            RuntimeAction::Broadcast(
+                                NetworkMessage::Transaction(
+                                    transaction,
+                                ),
+                            ),
+                        );
+                        self.append_pending_block_action(
+                            &mut outcome,
+                        );
+                    }
+                    Err(error) => {
+                        println!(
+                            "Transaction rejected: {transaction_id} - {error}"
+                        );
+                    }
                 }
             }
             NetworkMessage::Block(block) => {

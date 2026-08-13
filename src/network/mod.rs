@@ -1,5 +1,7 @@
 pub mod tcp;
 
+pub const ONE_SHOT_CLIENT_LISTEN_ADDRESS: &str = "127.0.0.1:0";
+
 use std::time::{
     SystemTime,
     UNIX_EPOCH,
@@ -99,6 +101,7 @@ pub struct PeerIdentity {
 pub enum PeerRegistrationOutcome {
     Registered,
     AlreadyRegistered,
+    OneShotClient,
     NodeIdConflict,
     ListenAddressConflict,
     PeerLimitReached,
@@ -580,6 +583,8 @@ impl Network {
         address: String,
     ) -> bool {
         if address.is_empty()
+            || address
+                == ONE_SHOT_CLIENT_LISTEN_ADDRESS
             || address.len()
                 > MAX_PEER_ADDRESS_LENGTH
         {
@@ -631,6 +636,12 @@ impl Network {
                 > MAX_PEER_ADDRESS_LENGTH
         {
             return PeerRegistrationOutcome::InvalidIdentity;
+        }
+
+        if listen_address
+            == ONE_SHOT_CLIENT_LISTEN_ADDRESS
+        {
+            return PeerRegistrationOutcome::OneShotClient;
         }
 
         if self
@@ -870,6 +881,12 @@ impl Network {
                             node_id,
                             network_id,
                             protocol_version
+                        );
+                    }
+
+                    PeerRegistrationOutcome::OneShotClient => {
+                        println!(
+                            "📥 Authenticated one-shot client; peer registry kaydı oluşturulmadı"
                         );
                     }
 

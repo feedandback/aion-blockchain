@@ -9,6 +9,7 @@ pub mod protocol;
 pub mod runtime;
 pub mod state;
 pub mod storage;
+pub mod transaction_submission;
 pub mod validator;
 pub mod wallet;
 

@@ -2,7 +2,11 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
 use kybernetes::network::tcp::TcpTransport;
-use kybernetes::network::NetworkMessage;
+use kybernetes::network::{
+    NetworkMessage,
+    ONE_SHOT_CLIENT_LISTEN_ADDRESS,
+};
+use kybernetes::wallet::Wallet;
 
 async fn stream_after_client_writes(bytes: &[u8]) -> TcpStream {
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -112,4 +116,50 @@ async fn valid_frame_is_read_before_the_clean_session_close() {
 
     let close = TcpTransport::read_message_or_eof(&mut stream).await;
     assert!(matches!(close, Ok(None)));
+}
+
+#[tokio::test]
+async fn authenticated_client_message_advertises_the_one_shot_address() {
+    let listener = TcpTransport::bind("127.0.0.1:0")
+        .await
+        .expect("test listener must bind");
+    let address = listener
+        .local_addr()
+        .expect("test listener must have an address");
+    let server = tokio::spawn(async move {
+        let server_wallet = Wallet::new();
+        let (mut stream, _, handshake) =
+            TcpTransport::accept_authenticated(
+                &listener,
+                &server_wallet,
+            )
+            .await
+            .expect("one-shot client must authenticate");
+        let message = TcpTransport::read_message(&mut stream)
+            .await
+            .expect("one-shot client message must arrive");
+
+        (handshake, message)
+    });
+    let client_wallet = Wallet::new();
+
+    TcpTransport::send_authenticated_client_message(
+        &address.to_string(),
+        &client_wallet,
+        &NetworkMessage::SyncRequest,
+    )
+    .await
+    .expect("one-shot authenticated message must be transmitted");
+    let (handshake, message) = server
+        .await
+        .expect("test server task must complete");
+
+    assert!(matches!(
+        handshake,
+        NetworkMessage::Handshake {
+            listen_address,
+            ..
+        } if listen_address == ONE_SHOT_CLIENT_LISTEN_ADDRESS
+    ));
+    assert!(matches!(message, NetworkMessage::SyncRequest));
 }

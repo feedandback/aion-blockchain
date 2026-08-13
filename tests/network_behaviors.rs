@@ -1,6 +1,7 @@
 use kybernetes::network::{
     Network,
     NetworkMessage,
+    ONE_SHOT_CLIENT_LISTEN_ADDRESS,
     PeerRegistrationOutcome,
 };
 use kybernetes::protocol::{MAX_HANDSHAKE_AGE_SECONDS, NETWORK_ID, NETWORK_PROTOCOL_VERSION};
@@ -22,9 +23,27 @@ fn signed_handshake(
     timestamp: u64,
     challenge: &str,
 ) -> NetworkMessage {
+    signed_handshake_for_address(
+        wallet,
+        LISTEN_ADDRESS,
+        network_id,
+        protocol_version,
+        timestamp,
+        challenge,
+    )
+}
+
+fn signed_handshake_for_address(
+    wallet: &Wallet,
+    listen_address: &str,
+    network_id: &str,
+    protocol_version: u32,
+    timestamp: u64,
+    challenge: &str,
+) -> NetworkMessage {
     let public_key = wallet.public_key_hex();
     let signature = wallet.sign_node_handshake(
-        LISTEN_ADDRESS,
+        listen_address,
         network_id,
         protocol_version,
         timestamp,
@@ -34,7 +53,7 @@ fn signed_handshake(
     assert!(Wallet::verify_node_handshake(
         wallet.node_id(),
         &public_key,
-        LISTEN_ADDRESS,
+        listen_address,
         network_id,
         protocol_version,
         timestamp,
@@ -45,13 +64,53 @@ fn signed_handshake(
     NetworkMessage::Handshake {
         node_id: wallet.node_id().to_string(),
         public_key,
-        listen_address: LISTEN_ADDRESS.to_string(),
+        listen_address: listen_address.to_string(),
         network_id: network_id.to_string(),
         protocol_version,
         timestamp,
         challenge: challenge.to_string(),
         signature,
     }
+}
+
+#[test]
+fn authenticated_one_shot_client_does_not_consume_a_peer_slot() {
+    let wallet = wallet();
+    let message = signed_handshake_for_address(
+        &wallet,
+        ONE_SHOT_CLIENT_LISTEN_ADDRESS,
+        NETWORK_ID,
+        NETWORK_PROTOCOL_VERSION,
+        Network::current_timestamp(),
+        &"78".repeat(32),
+    );
+    let mut network = Network::new();
+
+    assert!(Network::validate_handshake(&message));
+    assert!(!network.add_peer(
+        ONE_SHOT_CLIENT_LISTEN_ADDRESS.to_string()
+    ));
+    network.receive(message);
+
+    assert_eq!(network.peer_count(), 0);
+    assert_eq!(network.identified_peer_count(), 0);
+    assert_eq!(network.message_count(), 1);
+    assert_eq!(
+        network.register_peer_identity(
+            wallet.node_id().to_string(),
+            ONE_SHOT_CLIENT_LISTEN_ADDRESS.to_string(),
+        ),
+        PeerRegistrationOutcome::OneShotClient
+    );
+    assert_eq!(
+        network.register_peer_identity(
+            wallet.node_id().to_string(),
+            LISTEN_ADDRESS.to_string(),
+        ),
+        PeerRegistrationOutcome::Registered
+    );
+    assert_eq!(network.peer_count(), 1);
+    assert_eq!(network.identified_peer_count(), 1);
 }
 
 fn assert_handshake_rejected(message: NetworkMessage) {

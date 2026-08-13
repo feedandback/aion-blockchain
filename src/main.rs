@@ -9,6 +9,7 @@ mod protocol;
 mod runtime;
 mod state;
 mod storage;
+mod transaction_submission;
 mod validator;
 mod wallet;
 
@@ -28,6 +29,7 @@ use crate::runtime::{
     VALIDATOR_PASSWORD_ENV,
 };
 use crate::storage::Storage;
+use crate::transaction_submission::submit_from_active_validator;
 use crate::validator::{ValidatorCandidateKeystore, ValidatorKeystore};
 use crate::wallet::Wallet;
 
@@ -36,6 +38,9 @@ const WALLET_PASSWORD_ENV: &str =
 
 const LEGACY_WALLET_PASSWORD_ENV: &str =
     "AION_WALLET_PASSWORD";
+
+const DATA_DIRECTORY_ENV: &str =
+    "KYBERNETES_DATA_DIR";
 
 #[tokio::main]
 async fn main() {
@@ -194,6 +199,90 @@ async fn main() {
             ),
             Err(error) => {
                 eprintln!("Validator provisioning başarısız: {error}");
+                std::process::exit(1);
+            }
+        }
+
+        return;
+    }
+
+    if arguments.get(1).map(String::as_str)
+        == Some("transaction")
+    {
+        if arguments.len() != 6
+            || arguments.get(2).map(String::as_str)
+                != Some("submit")
+        {
+            eprintln!(
+                "Kullanım: kybernetes transaction submit <peer_address> <recipient_address> <amount_microkbn>"
+            );
+            std::process::exit(1);
+        }
+
+        let peer_address = match arguments[3]
+            .parse::<std::net::SocketAddr>()
+        {
+            Ok(address) if address.port() != 0 => address.to_string(),
+            _ => {
+                eprintln!("Peer address geçerli ve sıfır olmayan bir socket address olmalı");
+                std::process::exit(1);
+            }
+        };
+        let amount_micro_kbn = match arguments[5].parse::<u64>() {
+            Ok(amount) if amount > 0 => amount,
+            Err(_) => {
+                eprintln!("Amount microKBN pozitif bir u64 olmalı");
+                std::process::exit(1);
+            }
+            Ok(_) => {
+                eprintln!("Amount microKBN sıfırdan büyük olmalı");
+                std::process::exit(1);
+            }
+        };
+        let password = match std::env::var(VALIDATOR_PASSWORD_ENV) {
+            Ok(password) if !password.trim().is_empty() => password,
+            _ => {
+                eprintln!(
+                    "{} ortam değişkeni tanımlı olmalı",
+                    VALIDATOR_PASSWORD_ENV
+                );
+                std::process::exit(1);
+            }
+        };
+        let data_directory = match std::env::var(DATA_DIRECTORY_ENV) {
+            Ok(directory) if !directory.trim().is_empty() => {
+                std::path::PathBuf::from(directory)
+            }
+            _ => {
+                eprintln!(
+                    "{} ortam değişkeni tanımlı olmalı",
+                    DATA_DIRECTORY_ENV
+                );
+                std::process::exit(1);
+            }
+        };
+
+        match submit_from_active_validator(
+            &data_directory,
+            &password,
+            &peer_address,
+            &arguments[4],
+            amount_micro_kbn,
+        )
+        .await
+        {
+            Ok(transaction) => {
+                println!("Transaction transmitted");
+                println!("Transaction ID: {}", transaction.id);
+                println!("Sender address: {}", transaction.from);
+                println!("Recipient address: {}", transaction.to);
+                println!("Amount (microKBN): {}", transaction.amount);
+                println!("Calculated fee (microKBN): {}", transaction.fee);
+                println!("Nonce: {}", transaction.nonce);
+                println!("Target peer: {peer_address}");
+            }
+            Err(error) => {
+                eprintln!("Transaction gönderilemedi: {error}");
                 std::process::exit(1);
             }
         }
@@ -1415,7 +1504,7 @@ async fn main() {
         != Some("demo")
     {
         eprintln!(
-            "Kullanım: kybernetes [node [listen_address] [peer...]] | validator generate-candidate | validator candidate-address | validator activate-candidate | provision-validator | demo | mevcut test CLI modu"
+            "Kullanım: kybernetes [node [listen_address] [peer...]] | transaction submit <peer_address> <recipient_address> <amount_microkbn> | validator generate-candidate | validator candidate-address | validator activate-candidate | provision-validator | demo | mevcut test CLI modu"
         );
         return;
     }

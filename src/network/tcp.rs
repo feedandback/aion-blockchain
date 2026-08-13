@@ -18,6 +18,7 @@ use tokio::time::timeout;
 use crate::network::{
     Network,
     NetworkMessage,
+    ONE_SHOT_CLIENT_LISTEN_ADDRESS,
 };
 use crate::wallet::Wallet;
 use crate::protocol::{
@@ -885,6 +886,20 @@ impl TcpTransport {
             stream,
             peer_address,
             wallet,
+        )
+        .await
+    }
+
+    pub async fn send_authenticated_client_message(
+        address: &str,
+        wallet: &Wallet,
+        message: &NetworkMessage,
+    ) -> Result<(), String> {
+        Self::send_authenticated_message(
+            address,
+            wallet,
+            ONE_SHOT_CLIENT_LISTEN_ADDRESS,
+            message,
         )
         .await
     }
