@@ -290,6 +290,180 @@ fn node_accepts_a_valid_block_without_persisting_it() {
     assert_eq!(accepted_blockchain.economy.liquidity_reserve(), 8);
 }
 
+
+#[test]
+fn network_block_duplicate_is_idempotent_for_chain_state_economy_and_mempool() {
+    let (mut node, block, sender, recipient, validator, _) = node_and_valid_block();
+
+    let confirmed_transaction = block
+        .transactions
+        .iter()
+        .find(|transaction| !transaction.coinbase)
+        .expect("fixture block must contain a normal transaction")
+        .clone();
+
+    assert!(node.mempool.add_transaction(confirmed_transaction));
+
+    let sentinel_sender = wallet("04");
+    let sentinel_recipient = wallet("05");
+    let mut sentinel_transaction = Transaction::new(
+        sentinel_sender.address().to_string(),
+        sentinel_sender.public_key_hex(),
+        sentinel_recipient.address().to_string(),
+        1,
+        Economy::new().calculate_fee(1),
+        0,
+    );
+    sentinel_transaction.sign(sentinel_sender.sign(&sentinel_transaction.message()));
+    let sentinel_transaction_id = sentinel_transaction.id.clone();
+
+    assert!(node.mempool.add_transaction(sentinel_transaction));
+    assert_eq!(node.mempool.transactions.len(), 2);
+
+    node.receive_message_without_persisting_for_test(NetworkMessage::Block(block.clone()));
+
+    assert_eq!(node.blockchain.height(), 2);
+    assert_eq!(
+        node.blockchain
+            .chain
+            .last()
+            .expect("accepted chain must contain the network block")
+            .hash,
+        block.hash
+    );
+    assert_eq!(node.state.balance_of(&sender), 18_999_990);
+    assert_eq!(node.state.balance_of(&recipient), 1_000_000);
+    assert_eq!(node.state.balance_of(&validator), 10_000_002);
+    assert_eq!(node.blockchain.economy.supply(), 30_000_000);
+    assert_eq!(node.blockchain.economy.liquidity_reserve(), 8);
+    assert_eq!(node.state.treasury(), 0);
+    assert_eq!(node.state.burned(), 0);
+    assert_eq!(node.mempool.transactions.len(), 1);
+    assert_eq!(
+        node.mempool.transactions[0].id,
+        sentinel_transaction_id
+    );
+
+    let accepted_chain_hashes = node
+        .blockchain
+        .chain
+        .iter()
+        .map(|known_block| known_block.hash.clone())
+        .collect::<Vec<_>>();
+    let accepted_sender_balance = node.state.balance_of(&sender);
+    let accepted_recipient_balance = node.state.balance_of(&recipient);
+    let accepted_validator_balance = node.state.balance_of(&validator);
+    let accepted_supply = node.blockchain.economy.supply();
+    let accepted_liquidity_reserve = node.blockchain.economy.liquidity_reserve();
+    let accepted_treasury = node.state.treasury();
+    let accepted_burned = node.state.burned();
+    let accepted_mempool_ids = node
+        .mempool
+        .transactions
+        .iter()
+        .map(|transaction| transaction.id.clone())
+        .collect::<Vec<_>>();
+
+    node.receive_message_without_persisting_for_test(NetworkMessage::Block(block));
+
+    assert_eq!(
+        node.blockchain
+            .chain
+            .iter()
+            .map(|known_block| known_block.hash.clone())
+            .collect::<Vec<_>>(),
+        accepted_chain_hashes
+    );
+    assert_eq!(node.state.balance_of(&sender), accepted_sender_balance);
+    assert_eq!(
+        node.state.balance_of(&recipient),
+        accepted_recipient_balance
+    );
+    assert_eq!(
+        node.state.balance_of(&validator),
+        accepted_validator_balance
+    );
+    assert_eq!(node.blockchain.economy.supply(), accepted_supply);
+    assert_eq!(
+        node.blockchain.economy.liquidity_reserve(),
+        accepted_liquidity_reserve
+    );
+    assert_eq!(node.state.treasury(), accepted_treasury);
+    assert_eq!(node.state.burned(), accepted_burned);
+    assert_eq!(
+        node.mempool
+            .transactions
+            .iter()
+            .map(|transaction| transaction.id.clone())
+            .collect::<Vec<_>>(),
+        accepted_mempool_ids
+    );
+}
+
+#[test]
+fn same_index_different_hash_is_not_present_as_an_exact_duplicate() {
+    let (mut node, block, sender, recipient, validator, _) = node_and_valid_block();
+
+    node.receive_message_without_persisting_for_test(NetworkMessage::Block(block.clone()));
+    assert_eq!(node.blockchain.height(), 2);
+
+    let validator_wallet = wallet("03");
+    let mut different_block = block.clone();
+    different_block.timestamp = different_block
+        .timestamp
+        .checked_add(1)
+        .expect("test timestamp must not overflow");
+    different_block.hash = different_block.calculate_hash();
+    different_block.sign(validator_wallet.sign(different_block.hash.as_bytes()));
+
+    assert_eq!(different_block.index, block.index);
+    assert_ne!(different_block.hash, block.hash);
+    assert!(
+        !node
+            .blockchain
+            .chain
+            .iter()
+            .any(|known_block| known_block.hash == different_block.hash)
+    );
+
+    let original_chain_hashes = node
+        .blockchain
+        .chain
+        .iter()
+        .map(|known_block| known_block.hash.clone())
+        .collect::<Vec<_>>();
+    let original_sender_balance = node.state.balance_of(&sender);
+    let original_recipient_balance = node.state.balance_of(&recipient);
+    let original_validator_balance = node.state.balance_of(&validator);
+    let original_supply = node.blockchain.economy.supply();
+    let original_liquidity_reserve = node.blockchain.economy.liquidity_reserve();
+
+    assert!(!node.receive_block(different_block));
+
+    assert_eq!(
+        node.blockchain
+            .chain
+            .iter()
+            .map(|known_block| known_block.hash.clone())
+            .collect::<Vec<_>>(),
+        original_chain_hashes
+    );
+    assert_eq!(node.state.balance_of(&sender), original_sender_balance);
+    assert_eq!(
+        node.state.balance_of(&recipient),
+        original_recipient_balance
+    );
+    assert_eq!(
+        node.state.balance_of(&validator),
+        original_validator_balance
+    );
+    assert_eq!(node.blockchain.economy.supply(), original_supply);
+    assert_eq!(
+        node.blockchain.economy.liquidity_reserve(),
+        original_liquidity_reserve
+    );
+}
+
 #[test]
 fn node_rejects_a_manipulated_block_without_changing_live_state() {
     let (node, mut block, sender, recipient, validator, _) = node_and_valid_block();

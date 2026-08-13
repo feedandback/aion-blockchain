@@ -525,20 +525,29 @@ impl Node {
                 }
             }
 
-            NetworkMessage::Block(block) => {
-                println!(
-                    "📥 Network block alındı. Index: {}",
-                    block.index
-                );
+NetworkMessage::Block(block) => {
+    println!(
+        "📥 Network block alındı. Index: {}",
+        block.index
+    );
 
-                let accepted =
-                    self.receive_block(block);
+    let already_known = self
+        .blockchain
+        .chain
+        .iter()
+        .any(|known_block| known_block.hash == block.hash);
 
-                println!(
-                    "Block kabul edildi mi: {}",
-                    accepted
-                );
-            }
+    if already_known {
+        println!("Block already known: {}", block.hash);
+    } else {
+        let accepted = self.receive_block(block);
+
+        println!(
+            "Block kabul edildi mi: {}",
+            accepted
+        );
+    }
+}
 
             NetworkMessage::SyncRequest => {
                 self.network.receive(
