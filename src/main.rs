@@ -1,3 +1,4 @@
+mod bootstrap;
 mod chain;
 mod consensus;
 mod core;
@@ -9,22 +10,12 @@ mod state;
 mod storage;
 mod wallet;
 
-use crate::chain::Blockchain;
-use crate::consensus::Consensus;
-use crate::core::{Block, Transaction};
+use crate::bootstrap::canonical_bootstrap;
+use crate::core::Transaction;
 use crate::network::tcp::TcpTransport;
 use crate::network::{Network, NetworkMessage};
 use crate::node::Node;
-use crate::protocol::{
-    GENESIS_SUPPLY_MICRO_KBN,
-    GENESIS_TIMESTAMP,
-    GENESIS_VALIDATOR_A_ADDRESS,
-    GENESIS_VALIDATOR_A_STAKE,
-    GENESIS_VALIDATOR_B_ADDRESS,
-    GENESIS_VALIDATOR_B_STAKE,
-    MAX_SYNC_BLOCKS_PER_MESSAGE,
-};
-use crate::state::State;
+use crate::protocol::MAX_SYNC_BLOCKS_PER_MESSAGE;
 use crate::storage::Storage;
 use crate::wallet::Wallet;
 
@@ -216,59 +207,11 @@ async fn main() {
         let peer_address =
             arguments[2].clone();
 
-        let mut sync_consensus =
-            Consensus::new();
-
-        sync_consensus.add_validator(
-            GENESIS_VALIDATOR_A_ADDRESS
-                .to_string(),
-            GENESIS_VALIDATOR_A_STAKE,
-        );
-
-        sync_consensus.add_validator(
-            GENESIS_VALIDATOR_B_ADDRESS
-                .to_string(),
-            GENESIS_VALIDATOR_B_STAKE,
-        );
-
-        let mut sync_state =
-            State::new();
-
-        sync_state.create_account(
-            GENESIS_VALIDATOR_A_ADDRESS
-                .to_string(),
-            GENESIS_SUPPLY_MICRO_KBN,
-        );
-
-        sync_state.create_account(
-            GENESIS_VALIDATOR_B_ADDRESS
-                .to_string(),
-            0,
-        );
-
-        let sync_genesis =
-            Block::new(
-                0,
-                GENESIS_TIMESTAMP,
-                String::from("0"),
-                String::from("GENESIS"),
-                String::new(),
-                Vec::new(),
-            );
-
-        let mut sync_blockchain =
-            Blockchain::new(
-                sync_genesis,
-            );
-
-        sync_blockchain
-            .economy
-            .mint(
-                GENESIS_SUPPLY_MICRO_KBN,
-            )
-            .expect(
-                "Sync genesis arzı oluşturulamadı",
-            );
+        let sync_bootstrap =
+            canonical_bootstrap()
+                .expect(
+                    "Canonical sync genesis oluşturulamadı",
+                );
 
         println!(
             "✅ Sync node sabit Kybernetes genesis yapılandırmasıyla başlatıldı."
@@ -280,9 +223,11 @@ async fn main() {
 
         let mut sync_node =
             Node::new(
-                sync_blockchain,
-                sync_state,
-                sync_consensus,
+                sync_bootstrap
+                    .blockchain,
+                sync_bootstrap.state,
+                sync_bootstrap
+                    .consensus,
             );
 
         let requester_wallet =
@@ -716,117 +661,19 @@ async fn main() {
                 }
             };
 
-        let wallet_password =
-            std::env::var(
-                WALLET_PASSWORD_ENV,
-            )
-            .or_else(
-                |_| {
-                    std::env::var(
-                        LEGACY_WALLET_PASSWORD_ENV,
-                    )
-                },
-            )
-            .expect(
-                "Chain sync uygulama testi için KYBERNETES_WALLET_PASSWORD ortam değişkeni tanımlı olmalı",
-            );
-
-        let (
-            alice_private_key,
-            bob_private_key,
-        ) =
-            Storage::load_wallet_private_keys(
-                &wallet_password,
-            )
-            .expect(
-                "Yerel wallet anahtarları yüklenemedi",
-            )
-            .expect(
-                "Yerel wallet dosyası bulunamadı",
-            );
-
-        let alice_wallet =
-            Wallet::from_private_key_hex(
-                &alice_private_key,
-            )
-            .expect(
-                "Yerel Alice private key geçersiz",
-            );
-
-        let bob_wallet =
-            Wallet::from_private_key_hex(
-                &bob_private_key,
-            )
-            .expect(
-                "Yerel Bob private key geçersiz",
-            );
-
-        let genesis_supply =
-            1000 * 1_000_000;
-
-        let mut sync_consensus =
-            Consensus::new();
-
-        sync_consensus.add_validator(
-            alice_wallet
-                .address()
-                .to_string(),
-            700,
-        );
-
-        sync_consensus.add_validator(
-            bob_wallet
-                .address()
-                .to_string(),
-            300,
-        );
-
-        let mut sync_state =
-            State::new();
-
-        sync_state.create_account(
-            alice_wallet
-                .address()
-                .to_string(),
-            genesis_supply,
-        );
-
-        sync_state.create_account(
-            bob_wallet
-                .address()
-                .to_string(),
-            0,
-        );
-
-        let sync_genesis =
-            Block::new(
-                0,
-                1754690000,
-                String::from("0"),
-                String::from("GENESIS"),
-                String::new(),
-                Vec::new(),
-            );
-
-        let mut sync_blockchain =
-            Blockchain::new(
-                sync_genesis,
-            );
-
-        sync_blockchain
-            .economy
-            .mint(
-                genesis_supply,
-            )
-            .expect(
-                "Sync genesis arzı oluşturulamadı",
-            );
+        let sync_bootstrap =
+            canonical_bootstrap()
+                .expect(
+                    "Canonical sync genesis oluşturulamadı",
+                );
 
         let mut sync_node =
             Node::new(
-                sync_blockchain,
-                sync_state,
-                sync_consensus,
+                sync_bootstrap
+                    .blockchain,
+                sync_bootstrap.state,
+                sync_bootstrap
+                    .consensus,
             );
 
         let next_chunk =
@@ -1559,76 +1406,25 @@ async fn main() {
         );
     }
 
-    // ==========================
-    // GENESIS SUPPLY
-    // ==========================
-
-    let genesis_supply = 1000 * 1_000_000;
-
-    // ==========================
-    // CONSENSUS
-    // ==========================
-
-    let mut consensus = Consensus::new();
-
-    consensus.add_validator(
-        alice_wallet.address().to_string(),
-        700,
-    );
-
-    consensus.add_validator(
-        bob_wallet.address().to_string(),
-        300,
-    );
+    let alice_bootstrap =
+        canonical_bootstrap()
+            .expect(
+                "Canonical genesis oluşturulamadı",
+            );
 
     println!(
         "Validator sayısı: {}",
-        consensus.validator_count()
+        alice_bootstrap
+            .consensus
+            .validator_count()
     );
 
     println!(
         "Toplam stake: {} KBN",
-        consensus.total_stake()
+        alice_bootstrap
+            .consensus
+            .total_stake()
     );
-
-    // ==========================
-    // ALICE STATE
-    // ==========================
-
-    let mut state = State::new();
-
-    state.create_account(
-        alice_wallet.address().to_string(),
-        genesis_supply,
-    );
-
-    state.create_account(
-        bob_wallet.address().to_string(),
-        0,
-    );
-
-    // ==========================
-    // GENESIS
-    // ==========================
-
-    let genesis = Block::new(
-        0,
-        1754690000,
-        String::from("0"),
-        String::from("GENESIS"),
-        String::new(),
-        Vec::new(),
-    );
-
-    let mut blockchain =
-        Blockchain::new(genesis);
-
-    blockchain
-        .economy
-        .mint(genesis_supply)
-        .expect(
-            "Genesis arzı oluşturulamadı",
-        );
 
     // ==========================
     // ALICE NODE
@@ -1636,67 +1432,30 @@ async fn main() {
 
     let mut alice_node =
         Node::new(
-            blockchain,
-            state,
-            consensus,
+            alice_bootstrap
+                .blockchain,
+            alice_bootstrap.state,
+            alice_bootstrap
+                .consensus,
         );
 
     // ==========================
     // BOB NODE
     // ==========================
 
-    let mut bob_consensus =
-        Consensus::new();
-
-    bob_consensus.add_validator(
-        alice_wallet.address().to_string(),
-        700,
-    );
-
-    bob_consensus.add_validator(
-        bob_wallet.address().to_string(),
-        300,
-    );
-
-    let mut bob_state =
-        State::new();
-
-    bob_state.create_account(
-        alice_wallet.address().to_string(),
-        genesis_supply,
-    );
-
-    bob_state.create_account(
-        bob_wallet.address().to_string(),
-        0,
-    );
-
-    let bob_genesis = Block::new(
-        0,
-        1754690000,
-        String::from("0"),
-        String::from("GENESIS"),
-        String::new(),
-        Vec::new(),
-    );
-
-    let mut bob_blockchain =
-        Blockchain::new(
-            bob_genesis,
-        );
-
-    bob_blockchain
-        .economy
-        .mint(genesis_supply)
-        .expect(
-            "Bob genesis arzı oluşturulamadı",
-        );
+    let bob_bootstrap =
+        canonical_bootstrap()
+            .expect(
+                "Bob canonical genesis oluşturulamadı",
+            );
 
     let mut bob_node =
         Node::new(
-            bob_blockchain,
-            bob_state,
-            bob_consensus,
+            bob_bootstrap
+                .blockchain,
+            bob_bootstrap.state,
+            bob_bootstrap
+                .consensus,
         );
 
     // ==========================
