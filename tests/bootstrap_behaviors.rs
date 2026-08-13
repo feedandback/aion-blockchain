@@ -10,10 +10,18 @@ use kybernetes::wallet::Wallet;
 
 const PRIVATE_KEY_ONE: &str = "0101010101010101010101010101010101010101010101010101010101010101";
 const PRIVATE_KEY_TWO: &str = "0202020202020202020202020202020202020202020202020202020202020202";
+const PREVIOUS_VALIDATOR_A_ADDRESS: &str =
+    "e78e5a3f52365b555c495371141c05e5992b5f786dd526c778af16dfb8cf822b";
+const PREVIOUS_VALIDATOR_B_ADDRESS: &str =
+    "a3c7e0f73b41bc841f8cefe6ff0d43fc24aa259eb4f90db4b408fdc3f4eb5fb4";
+const PRODUCTION_VALIDATOR_A_ADDRESS: &str =
+    "66e0a6e68b5d5f2f01c42d4f5bcc32ff475917d29a84891a564281d06dac0194";
+const PRODUCTION_VALIDATOR_B_ADDRESS: &str =
+    "fe36b693330e3e48ae0ed1a78f92e38a99eb228bc3d3ab617ac70d75b28f5e78";
 const GENESIS_FINGERPRINT: &str =
-    "0bc11d7710ac5dd8969133a5b721d34d0410c144d5bd87cfdbccc2d3c421cfef";
+    "a8058a98726615210584690b23e3acb08586fc775cdf481b5f822ef1839bc923";
 const GENESIS_HASH: &str =
-    "791abca72f3ff947dc7fdfbd854bde83a72ecf8fae812b21f00a53bb75ad640c";
+    "cd5bf53fb00481798aeef82625ce208ca0ecf714716da136ccc7124de8855647";
 
 fn bootstrap() -> CanonicalBootstrap {
     canonical_bootstrap().expect("canonical bootstrap must be valid")
@@ -179,6 +187,56 @@ fn canonical_bootstraps_have_the_same_validator_stakes() {
     assert_eq!(
         first.consensus.total_stake(),
         GENESIS_VALIDATOR_A_STAKE + GENESIS_VALIDATOR_B_STAKE
+    );
+}
+
+#[test]
+fn canonical_validator_set_uses_production_addresses_and_excludes_demo_addresses() {
+    let first = bootstrap();
+    let second = bootstrap();
+
+    assert_eq!(GENESIS_VALIDATOR_A_ADDRESS, PRODUCTION_VALIDATOR_A_ADDRESS);
+    assert_eq!(GENESIS_VALIDATOR_B_ADDRESS, PRODUCTION_VALIDATOR_B_ADDRESS);
+
+    for previous_address in [
+        PREVIOUS_VALIDATOR_A_ADDRESS,
+        PREVIOUS_VALIDATOR_B_ADDRESS,
+    ] {
+        assert!(!first.consensus.is_validator_allowed(previous_address));
+        assert!(!first.state.accounts.contains_key(previous_address));
+    }
+
+    assert!(
+        first
+            .consensus
+            .is_validator_allowed(PRODUCTION_VALIDATOR_A_ADDRESS)
+    );
+    assert!(
+        first
+            .consensus
+            .is_validator_allowed(PRODUCTION_VALIDATOR_B_ADDRESS)
+    );
+    assert_eq!(
+        first
+            .consensus
+            .get_validator(PRODUCTION_VALIDATOR_A_ADDRESS)
+            .expect("production validator A must be canonical")
+            .stake,
+        700
+    );
+    assert_eq!(
+        first
+            .consensus
+            .get_validator(PRODUCTION_VALIDATOR_B_ADDRESS)
+            .expect("production validator B must be canonical")
+            .stake,
+        300
+    );
+    assert_eq!(validator_snapshot(&first), validator_snapshot(&second));
+    assert_eq!(first.genesis_fingerprint, second.genesis_fingerprint);
+    assert_eq!(
+        first.blockchain.chain[0].hash,
+        second.blockchain.chain[0].hash
     );
 }
 
