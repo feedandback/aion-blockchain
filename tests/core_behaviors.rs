@@ -50,14 +50,28 @@ fn genesis_block() -> Block {
         .expect("canonical test chain must contain genesis")
 }
 
-fn signed_empty_block(genesis: &Block, validator: &Wallet) -> Block {
+fn signed_block_with_normal_transaction(genesis: &Block, validator: &Wallet) -> Block {
+    let mut transaction = Transaction::new(
+        validator.address().to_string(),
+        validator.public_key_hex(),
+        ADDRESS_ONE.to_string(),
+        1,
+        10,
+        0,
+    );
+    transaction.sign(validator.sign(&transaction.message()));
+    let coinbase = Transaction::new_coinbase(
+        validator.address().to_string(),
+        Economy::new().block_reward,
+        1,
+    );
     let mut block = Block::new(
         1,
         GENESIS_TIMESTAMP + 1,
         genesis.hash.clone(),
         validator.address().to_string(),
         validator.public_key_hex(),
-        Vec::new(),
+        vec![transaction, coinbase],
     );
     block.sign(validator.sign(block.hash.as_bytes()));
     block
@@ -169,7 +183,7 @@ fn node_rejects_a_transaction_with_insufficient_balance() {
 fn block_hash_and_previous_hash_are_validated() {
     let validator = wallet(PRIVATE_KEY_THREE);
     let genesis = genesis_block();
-    let valid_block = signed_empty_block(&genesis, &validator);
+    let valid_block = signed_block_with_normal_transaction(&genesis, &validator);
 
     assert!(valid_block.is_hash_valid());
 
@@ -177,14 +191,10 @@ fn block_hash_and_previous_hash_are_validated() {
     assert!(chain.add_received_block(valid_block).is_ok());
     assert!(chain.is_valid());
 
-    let mut wrong_previous_hash = Block::new(
-        1,
-        GENESIS_TIMESTAMP + 1,
-        "11".repeat(32),
-        validator.address().to_string(),
-        validator.public_key_hex(),
-        Vec::new(),
-    );
+    let mut wrong_previous_hash =
+        signed_block_with_normal_transaction(&genesis, &validator);
+    wrong_previous_hash.previous_hash = "11".repeat(32);
+    wrong_previous_hash.hash = wrong_previous_hash.calculate_hash();
     wrong_previous_hash.sign(validator.sign(wrong_previous_hash.hash.as_bytes()));
 
     let mut fresh_chain = Blockchain::new(genesis);
@@ -468,7 +478,7 @@ fn validator_selection_is_deterministic_for_the_same_hash() {
 fn blockchain_accepts_a_valid_signed_block() {
     let validator = wallet(PRIVATE_KEY_THREE);
     let genesis = genesis_block();
-    let block = signed_empty_block(&genesis, &validator);
+    let block = signed_block_with_normal_transaction(&genesis, &validator);
     let mut blockchain = Blockchain::new(genesis);
 
     assert!(blockchain.add_received_block(block.clone()).is_ok());
@@ -481,7 +491,7 @@ fn blockchain_accepts_a_valid_signed_block() {
 fn blockchain_rejects_a_manipulated_block_hash() {
     let validator = wallet(PRIVATE_KEY_THREE);
     let genesis = genesis_block();
-    let mut block = signed_empty_block(&genesis, &validator);
+    let mut block = signed_block_with_normal_transaction(&genesis, &validator);
     block.hash.replace_range(..1, "f");
     let mut blockchain = Blockchain::new(genesis);
 

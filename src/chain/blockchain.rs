@@ -170,6 +170,17 @@ impl Blockchain {
             return Ok(());
         }
 
+        if !block
+            .transactions
+            .iter()
+            .any(|transaction| !transaction.coinbase)
+        {
+            return Err(
+                "Genesis dışı block en az bir normal transaction içermeli"
+                    .into(),
+            );
+        }
+
         if !is_fixed_hex(
             &block.previous_hash,
             HASH_HEX_LENGTH,

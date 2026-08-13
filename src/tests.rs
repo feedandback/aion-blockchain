@@ -138,6 +138,138 @@ fn node_and_valid_block() -> (Node, Block, String, String, String, u64) {
     )
 }
 
+fn node_and_coinbase_only_block() -> (Node, Block, String) {
+    let (node, valid_block, _, _, validator_address, _) =
+        node_and_valid_block();
+    let validator = wallet("03");
+    let coinbase = valid_block
+        .transactions
+        .iter()
+        .find(|transaction| transaction.coinbase)
+        .expect("fixture block must contain coinbase")
+        .clone();
+    let mut block = Block::new(
+        valid_block.index,
+        valid_block.timestamp,
+        valid_block.previous_hash,
+        valid_block.validator,
+        valid_block.validator_public_key,
+        vec![coinbase],
+    );
+    block.sign(validator.sign(block.hash.as_bytes()));
+
+    (node, block, validator_address)
+}
+
+#[test]
+fn genesis_without_transactions_remains_valid() {
+    let genesis = genesis_block();
+
+    assert!(genesis.transactions.is_empty());
+    assert!(genesis.is_hash_valid());
+    assert!(Blockchain::new(genesis).is_valid());
+}
+
+#[test]
+fn local_producer_rejects_an_empty_mempool() {
+    let sender = wallet("01");
+    let recipient = wallet("02");
+    let validator = wallet("03");
+    let mut blockchain = Blockchain::new(genesis_block());
+    blockchain
+        .economy
+        .mint(INITIAL_SUPPLY)
+        .expect("test supply must fit below max supply");
+    let mut state = initial_state(&sender, &recipient, &validator);
+    let mut mempool = Mempool::new();
+    let original_height = blockchain.height();
+    let original_supply = blockchain.economy.supply();
+    let original_validator_balance = state.balance_of(validator.address());
+
+    let result = blockchain.create_block_from_mempool(
+        GENESIS_TIMESTAMP + 1,
+        &validator,
+        &mut mempool,
+        &mut state,
+    );
+
+    assert!(result.is_err());
+    assert_eq!(blockchain.height(), original_height);
+    assert_eq!(blockchain.economy.supply(), original_supply);
+    assert_eq!(
+        state.balance_of(validator.address()),
+        original_validator_balance
+    );
+}
+
+#[test]
+fn node_rejects_an_inbound_coinbase_only_block() {
+    let (node, block, _) = node_and_coinbase_only_block();
+
+    assert!(block.is_hash_valid());
+    assert_eq!(
+        block
+            .transactions
+            .iter()
+            .filter(|transaction| !transaction.coinbase)
+            .count(),
+        0
+    );
+    assert!(node.validate_and_apply_block_for_test(block).is_err());
+}
+
+#[test]
+fn node_accepts_a_block_with_a_normal_transaction_and_correct_coinbase() {
+    let (node, block, _, _, _, _) = node_and_valid_block();
+
+    assert_eq!(
+        block
+            .transactions
+            .iter()
+            .filter(|transaction| !transaction.coinbase)
+            .count(),
+        1
+    );
+    assert!(
+        block
+            .transactions
+            .last()
+            .expect("fixture block must contain transactions")
+            .coinbase
+    );
+    assert!(node.validate_and_apply_block_for_test(block).is_ok());
+}
+
+#[test]
+fn node_rejects_a_self_consistent_tampered_coinbase_only_block() {
+    let (node, mut block, _) = node_and_coinbase_only_block();
+    let validator = wallet("03");
+    block.transactions[0].amount += 1;
+    block.transactions[0].id = block.transactions[0].calculate_id();
+    block.hash = block.calculate_hash();
+    block.sign(validator.sign(block.hash.as_bytes()));
+
+    assert!(block.is_hash_valid());
+    assert!(node.validate_and_apply_block_for_test(block).is_err());
+}
+
+#[test]
+fn rejected_coinbase_only_block_does_not_change_reward_or_supply() {
+    let (mut node, block, validator_address) =
+        node_and_coinbase_only_block();
+    let original_height = node.blockchain.height();
+    let original_supply = node.blockchain.economy.supply();
+    let original_validator_balance = node.state.balance_of(&validator_address);
+
+    assert!(!node.receive_block(block));
+    assert_eq!(node.blockchain.height(), original_height);
+    assert_eq!(node.blockchain.economy.supply(), original_supply);
+    assert_eq!(
+        node.state.balance_of(&validator_address),
+        original_validator_balance
+    );
+}
+
 #[test]
 fn node_accepts_a_valid_block_without_persisting_it() {
     let (node, block, sender, recipient, validator, producer_liquidity_reserve) =
@@ -208,6 +340,15 @@ fn build_remote_chain() -> Vec<Block> {
 
     for index in 1..total_blocks {
         let block_index = u64::try_from(index).expect("test block index must fit u64");
+        let mut transaction = Transaction::new(
+            validator.address().to_string(),
+            validator.public_key_hex(),
+            validator.address().to_string(),
+            1,
+            Economy::new().calculate_fee(1),
+            block_index - 1,
+        );
+        transaction.sign(validator.sign(&transaction.message()));
         let coinbase =
             Transaction::new_coinbase(validator.address().to_string(), reward, block_index);
         let mut block = Block::new(
@@ -220,7 +361,7 @@ fn build_remote_chain() -> Vec<Block> {
                 .clone(),
             validator.address().to_string(),
             validator.public_key_hex(),
-            vec![coinbase],
+            vec![transaction, coinbase],
         );
         block.sign(validator.sign(block.hash.as_bytes()));
         chain.push(block);
@@ -239,7 +380,7 @@ fn remote_chain(total_blocks: usize) -> Vec<Block> {
 fn chain_sync_node() -> Node {
     let validator = wallet("03");
     let mut state = State::new();
-    state.create_account(validator.address().to_string(), 0);
+    state.create_account(validator.address().to_string(), 11);
     let mut consensus = Consensus::new();
     assert!(consensus.add_validator(validator.address().to_string(), 1));
 
