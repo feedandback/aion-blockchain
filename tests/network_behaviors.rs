@@ -1,6 +1,6 @@
-use aion::network::{Network, NetworkMessage};
-use aion::protocol::{MAX_HANDSHAKE_AGE_SECONDS, NETWORK_ID, NETWORK_PROTOCOL_VERSION};
-use aion::wallet::Wallet;
+use kybernetes::network::{Network, NetworkMessage};
+use kybernetes::protocol::{MAX_HANDSHAKE_AGE_SECONDS, NETWORK_ID, NETWORK_PROTOCOL_VERSION};
+use kybernetes::wallet::Wallet;
 
 const PRIVATE_KEY: &str = "0101010101010101010101010101010101010101010101010101010101010101";
 const LISTEN_ADDRESS: &str = "127.0.0.1:41001";
@@ -84,7 +84,7 @@ fn network_rejects_a_handshake_for_the_wrong_network_id() {
     let challenge = "bc".repeat(32);
     let message = signed_handshake(
         &wallet,
-        "aion-testnet-v1",
+        "kybernetes-testnet-v1",
         NETWORK_PROTOCOL_VERSION,
         Network::current_timestamp(),
         &challenge,

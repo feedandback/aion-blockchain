@@ -1,11 +1,11 @@
-use aion::chain::{Blockchain, Mempool};
-use aion::consensus::Consensus;
-use aion::core::{Block, Transaction};
-use aion::economy::Economy;
-use aion::node::Node;
-use aion::protocol::{GENESIS_PREVIOUS_HASH, GENESIS_TIMESTAMP, GENESIS_VALIDATOR};
-use aion::state::State;
-use aion::wallet::Wallet;
+use kybernetes::chain::{Blockchain, Mempool};
+use kybernetes::consensus::Consensus;
+use kybernetes::core::{Block, Transaction};
+use kybernetes::economy::Economy;
+use kybernetes::node::Node;
+use kybernetes::protocol::{GENESIS_PREVIOUS_HASH, GENESIS_TIMESTAMP, GENESIS_VALIDATOR};
+use kybernetes::state::State;
+use kybernetes::wallet::Wallet;
 
 const PRIVATE_KEY_ONE: &str = "0101010101010101010101010101010101010101010101010101010101010101";
 const PRIVATE_KEY_TWO: &str = "0202020202020202020202020202020202020202020202020202020202020202";
@@ -14,7 +14,7 @@ const PUBLIC_KEY_ONE: &str = "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3
 const ADDRESS_ONE: &str = "34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e";
 const ADDRESS_TWO: &str = "6a3803d5f059902a1c6dafbc9ba4729212f7caac08634cc3ae76b27529f03827";
 const TRANSACTION_ID: &str = "e6032174544abb55e3223a6e5a692cd0026023cb64e35903885af13f77fedc1f";
-const WALLET_SIGNATURE: &str = "8f6b383585f7dfff7b7e0370b4edfa306400b82aff451c67f0659d1bbee735dd77851f39e20dd2dd59a6e8e9745bd467e2fbe2782d16436224d19268e539fa01";
+const WALLET_SIGNATURE: &str = "644dd46aeec3e80c0db0d40bc1bcff5d140e19228354b3da66937b29130484ae9c8d38e2e393c5308743cf5d73d89d94a83cf3c7f57e84056f93f0c11bd72b0f";
 
 fn wallet(private_key: &str) -> Wallet {
     Wallet::from_private_key_hex(private_key).expect("test private key must be valid")
@@ -105,7 +105,7 @@ fn transaction_creation_has_a_stable_id_and_detects_payload_changes() {
 fn wallet_signatures_verify_and_reject_tampered_inputs() {
     let signer = wallet(PRIVATE_KEY_ONE);
     let other_wallet = wallet(PRIVATE_KEY_TWO);
-    let message = b"AION wallet signature fixture";
+    let message = b"Kybernetes wallet signature fixture";
     let signature = signer.sign(message);
 
     assert_eq!(signer.public_key_hex(), PUBLIC_KEY_ONE);
@@ -118,7 +118,7 @@ fn wallet_signatures_verify_and_reject_tampered_inputs() {
     ));
     assert!(!Wallet::verify(
         &signer.public_key_hex(),
-        b"AION wallet signature fixture!",
+        b"Kybernetes wallet signature fixture!",
         &signature
     ));
     assert!(!Wallet::verify(
@@ -280,7 +280,7 @@ fn fee_distribution_preserves_every_charged_unit() {
     assert_eq!(
         validator_fee + treasury_fee + burn_fee,
         fee,
-        "fee distribution must not create or lose micro-AION"
+        "fee distribution must not create or lose microKBN"
     );
 }
 

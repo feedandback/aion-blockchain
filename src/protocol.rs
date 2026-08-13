@@ -1,4 +1,4 @@
-// AION V1 merkezi protokol sabitleri.
+// Kybernetes V1 merkezi protokol sabitleri.
 //
 // Konsensüs açısından kritik limit ve format değerleri
 // tek noktadan yönetilir. Node, Blockchain ve Mempool
@@ -13,10 +13,10 @@ pub const MAX_NETWORK_MESSAGE_HISTORY: usize = 10_000;
 pub const MAX_NETWORK_INBOX_MESSAGES: usize = 10_000;
 pub const MAX_PEER_ADDRESS_LENGTH: usize = 256;
 
-// AION ağ kimliği.
+// Kybernetes ağ kimliği.
 // Farklı network_id kullanan node'lar birbirine bağlanmamalıdır.
 #[allow(dead_code)]
-pub const NETWORK_ID: &str = "aion-mainnet-v1";
+pub const NETWORK_ID: &str = "kybernetes-mainnet-v1";
 
 // P2P mesaj protokolü sürümü.
 #[allow(dead_code)]
@@ -60,11 +60,11 @@ pub const SYSTEM_REWARD_SIGNATURE: &str =
 pub const GENESIS_PREVIOUS_HASH: &str = "0";
 pub const GENESIS_VALIDATOR: &str = "GENESIS";
 
-// AION ağının sabit genesis yapılandırması.
+// Kybernetes ağının sabit genesis yapılandırması.
 // Her bağımsız node aynı genesis state ve validator setini
 // private key paylaşmadan doğrulayabilmelidir.
 pub const GENESIS_TIMESTAMP: u64 = 1_754_690_000;
-pub const GENESIS_SUPPLY_MICRO_AION: u64 =
+pub const GENESIS_SUPPLY_MICRO_KBN: u64 =
     1_000_000_000;
 
 pub const GENESIS_VALIDATOR_A_ADDRESS: &str =

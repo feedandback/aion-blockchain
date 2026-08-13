@@ -1,7 +1,7 @@
 #[derive(Debug, Clone)]
 pub struct Economy {
     // Micro unit
-    // 1 AION = 1.000.000 unit
+    // 1 KBN = 1.000.000 unit
     pub total_supply: u64,
 
     pub max_supply: u64,
@@ -27,14 +27,14 @@ impl Economy {
             // Genesis başlangıç arzı
             total_supply: 0,
 
-            // 100 milyon AION
+            // 100 milyon KBN
             max_supply: 100_000_000 * 1_000_000,
 
             // Validator ödülü
             block_reward: 10 * 1_000_000,
 
             // Minimum fee
-            // 0.001 AION
+            // 0.001 KBN
             minimum_fee: 1_000,
 
             validator_fee_percent: 70,

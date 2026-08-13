@@ -16,7 +16,7 @@ use crate::network::tcp::TcpTransport;
 use crate::network::{Network, NetworkMessage};
 use crate::node::Node;
 use crate::protocol::{
-    GENESIS_SUPPLY_MICRO_AION,
+    GENESIS_SUPPLY_MICRO_KBN,
     GENESIS_TIMESTAMP,
     GENESIS_VALIDATOR_A_ADDRESS,
     GENESIS_VALIDATOR_A_STAKE,
@@ -27,6 +27,12 @@ use crate::protocol::{
 use crate::state::State;
 use crate::storage::Storage;
 use crate::wallet::Wallet;
+
+const WALLET_PASSWORD_ENV: &str =
+    "KYBERNETES_WALLET_PASSWORD";
+
+const LEGACY_WALLET_PASSWORD_ENV: &str =
+    "AION_WALLET_PASSWORD";
 
 #[tokio::main]
 async fn main() {
@@ -231,7 +237,7 @@ async fn main() {
         sync_state.create_account(
             GENESIS_VALIDATOR_A_ADDRESS
                 .to_string(),
-            GENESIS_SUPPLY_MICRO_AION,
+            GENESIS_SUPPLY_MICRO_KBN,
         );
 
         sync_state.create_account(
@@ -258,14 +264,14 @@ async fn main() {
         sync_blockchain
             .economy
             .mint(
-                GENESIS_SUPPLY_MICRO_AION,
+                GENESIS_SUPPLY_MICRO_KBN,
             )
             .expect(
                 "Sync genesis arzı oluşturulamadı",
             );
 
         println!(
-            "✅ Sync node sabit AION genesis yapılandırmasıyla başlatıldı."
+            "✅ Sync node sabit Kybernetes genesis yapılandırmasıyla başlatıldı."
         );
 
         println!(
@@ -712,10 +718,17 @@ async fn main() {
 
         let wallet_password =
             std::env::var(
-                "AION_WALLET_PASSWORD",
+                WALLET_PASSWORD_ENV,
+            )
+            .or_else(
+                |_| {
+                    std::env::var(
+                        LEGACY_WALLET_PASSWORD_ENV,
+                    )
+                },
             )
             .expect(
-                "Chain sync uygulama testi için AION_WALLET_PASSWORD ortam değişkeni tanımlı olmalı",
+                "Chain sync uygulama testi için KYBERNETES_WALLET_PASSWORD ortam değişkeni tanımlı olmalı",
             );
 
         let (
@@ -896,7 +909,7 @@ async fn main() {
             );
 
         println!(
-            "AION sürekli P2P listener başlatıldı: {}",
+            "Kybernetes sürekli P2P listener başlatıldı: {}",
             listen_address
         );
 
@@ -1170,7 +1183,7 @@ async fn main() {
                 .to_string();
 
         let wrong_network_id =
-            "wrong-aion-network"
+            "wrong-kybernetes-network"
                 .to_string();
 
         let protocol_version =
@@ -1325,10 +1338,17 @@ async fn main() {
 
     let wallet_password =
         std::env::var(
-            "AION_WALLET_PASSWORD",
+            WALLET_PASSWORD_ENV,
+        )
+        .or_else(
+            |_| {
+                std::env::var(
+                    LEGACY_WALLET_PASSWORD_ENV,
+                )
+            },
         )
         .expect(
-            "AION_WALLET_PASSWORD ortam değişkeni tanımlı değil",
+            "KYBERNETES_WALLET_PASSWORD ortam değişkeni tanımlı değil",
         );
 
     // ==========================
@@ -1567,7 +1587,7 @@ async fn main() {
     );
 
     println!(
-        "Toplam stake: {} AION",
+        "Toplam stake: {} KBN",
         consensus.total_stake()
     );
 
@@ -1743,7 +1763,7 @@ async fn main() {
             );
 
             println!(
-                "Alice yüklenen bakiye: {} AION",
+                "Alice yüklenen bakiye: {} KBN",
                 alice_node
                     .state
                     .balance_of(
@@ -1753,7 +1773,7 @@ async fn main() {
             );
 
             println!(
-                "Bob yüklenen bakiye: {} AION",
+                "Bob yüklenen bakiye: {} KBN",
                 alice_node
                     .state
                     .balance_of(
@@ -1763,7 +1783,7 @@ async fn main() {
             );
 
             println!(
-                "Yüklenen toplam arz: {} AION",
+                "Yüklenen toplam arz: {} KBN",
                 alice_node
                     .blockchain
                     .economy
@@ -2065,7 +2085,7 @@ async fn main() {
     println!();
 
     println!(
-        "Alice başlangıç bakiyesi: {} AION",
+        "Alice başlangıç bakiyesi: {} KBN",
         alice_node
             .state
             .balance_of(
@@ -2075,7 +2095,7 @@ async fn main() {
     );
 
     println!(
-        "Bob başlangıç bakiyesi: {} AION",
+        "Bob başlangıç bakiyesi: {} KBN",
         alice_node
             .state
             .balance_of(
@@ -2085,7 +2105,7 @@ async fn main() {
     );
 
     println!(
-        "Genesis toplam arzı: {} AION",
+        "Genesis toplam arzı: {} KBN",
         alice_node
             .blockchain
             .economy
@@ -2109,7 +2129,7 @@ async fn main() {
             );
 
     println!(
-        "İlk transaction fee: {} microAION",
+        "İlk transaction fee: {} microKBN",
         first_fee
     );
 
@@ -2229,7 +2249,7 @@ async fn main() {
             );
 
     println!(
-        "İkinci transaction fee: {} microAION",
+        "İkinci transaction fee: {} microKBN",
         second_fee
     );
 
@@ -3875,7 +3895,7 @@ async fn main() {
     );
 
     println!(
-        "Alice final bakiye: {} AION",
+        "Alice final bakiye: {} KBN",
         alice_node
             .state
             .balance_of(
@@ -3885,7 +3905,7 @@ async fn main() {
     );
 
     println!(
-        "Bob final bakiye: {} AION",
+        "Bob final bakiye: {} KBN",
         alice_node
             .state
             .balance_of(
@@ -3895,14 +3915,14 @@ async fn main() {
     );
 
     println!(
-        "Treasury: {} microAION",
+        "Treasury: {} microKBN",
         alice_node
             .state
             .treasury()
     );
 
     println!(
-        "Yakılan miktar: {} microAION",
+        "Yakılan miktar: {} microKBN",
         alice_node
             .state
             .burned()
@@ -3923,7 +3943,7 @@ async fn main() {
     );
 
     println!(
-        "Toplam arz: {} AION",
+        "Toplam arz: {} KBN",
         alice_node
             .blockchain
             .economy

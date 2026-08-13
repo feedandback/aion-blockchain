@@ -336,7 +336,7 @@ impl TcpTransport {
             );
 
         println!(
-            "🌐 AION TCP listener aktif: {}",
+            "🌐 Kybernetes TCP listener aktif: {}",
             address
         );
 
@@ -456,7 +456,7 @@ impl TcpTransport {
             );
 
         println!(
-            "🌐 Kimliği doğrulanmış AION P2P listener aktif: {}",
+            "🌐 Kimliği doğrulanmış Kybernetes P2P listener aktif: {}",
             address
         );
 

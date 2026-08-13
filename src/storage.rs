@@ -26,6 +26,9 @@ const DEFAULT_DATA_DIRECTORY: &str =
     "data";
 
 const DATA_DIRECTORY_ENV: &str =
+    "KYBERNETES_DATA_DIR";
+
+const LEGACY_DATA_DIRECTORY_ENV: &str =
     "AION_DATA_DIR";
 
 const BLOCKCHAIN_FILE_NAME: &str =
@@ -70,6 +73,13 @@ impl Storage {
     ) -> PathBuf {
         match std::env::var(
             DATA_DIRECTORY_ENV,
+        )
+        .or_else(
+            |_| {
+                std::env::var(
+                    LEGACY_DATA_DIRECTORY_ENV,
+                )
+            },
         ) {
             Ok(value)
                 if !value

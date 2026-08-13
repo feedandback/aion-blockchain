@@ -801,7 +801,7 @@ impl Network {
                 transaction,
             ) => {
                 println!(
-                    "📥 Yeni transaction alındı: {} AION",
+                    "📥 Yeni transaction alındı: {} KBN",
                     transaction.amount
                 );
             }

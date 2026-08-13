@@ -149,7 +149,7 @@ impl Blockchain {
             );
         }
 
-        // Genesis mevcut AION protokolünde özel formattadır.
+        // Genesis mevcut Kybernetes protokolünde özel formattadır.
         if block.index == 0 {
             if block.previous_hash != GENESIS_PREVIOUS_HASH
                 || block.validator != GENESIS_VALIDATOR
@@ -648,7 +648,7 @@ impl Blockchain {
         );
 
         println!(
-            "💰 Toplam AION arzı: {}",
+            "💰 Toplam KBN arzı: {}",
             self.economy
                 .supply()
                 / 1_000_000
