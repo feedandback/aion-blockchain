@@ -166,6 +166,17 @@ impl Storage {
         )
     }
 
+    fn unique_wallet_temp_path(
+        data_directory: &Path,
+    ) -> PathBuf {
+        let random_name = hex::encode(
+            chacha20poly1305::Key::generate(),
+        );
+        data_directory.join(
+            format!(".{WALLETS_TEMP_FILE_NAME}-{random_name}"),
+        )
+    }
+
     fn ensure_data_directory_at(
         data_directory: &Path,
     ) -> Result<(), String> {
@@ -176,7 +187,7 @@ impl Storage {
         .map_err(
             |error| {
                 format!(
-                    "Data klasörü oluşturulamadı ({}): {}",
+                    "Data directory could not be created ({}): {}",
                     data_directory.display(),
                     error
                 )
@@ -202,7 +213,7 @@ impl Storage {
     ) -> Result<(), String> {
         if chain.is_empty() {
             return Err(
-                "Boş blockchain kaydedilemez"
+                "Empty blockchain cannot be saved"
                     .into(),
             );
         }
@@ -218,7 +229,7 @@ impl Storage {
             .map_err(
                 |error| {
                     format!(
-                        "Blockchain JSON'a çevrilemedi: {}",
+                        "Blockchain could not be serialized to JSON: {}",
                         error
                     )
                 },
@@ -245,7 +256,7 @@ impl Storage {
                 .map_err(
                     |error| {
                         format!(
-                            "Geçici blockchain dosyası oluşturulamadı: {}",
+                            "Temporary blockchain file could not be created: {}",
                             error
                         )
                     },
@@ -257,7 +268,7 @@ impl Storage {
             .map_err(
                 |error| {
                     format!(
-                        "Blockchain diske yazılamadı: {}",
+                        "Blockchain could not be written to disk: {}",
                         error
                     )
                 },
@@ -267,21 +278,21 @@ impl Storage {
                 .map_err(
                     |error| {
                         format!(
-                            "Blockchain dosyası diske senkronize edilemedi: {}",
+                            "Blockchain file could not be synchronized to disk: {}",
                             error
                         )
                     },
                 )?;
         }
 
-        Self::replace_blockchain_file(
+        Self::replace_file(
             &temp_path,
             &final_path,
         )
         .map_err(
             |error| {
                 format!(
-                    "Blockchain dosyası aktif konuma taşınamadı: {}",
+                    "Blockchain file could not be moved into the active location: {}",
                     error
                 )
             },
@@ -292,7 +303,7 @@ impl Storage {
             File::open(data_directory).and_then(|directory| directory.sync_all())
         {
             eprintln!(
-                "Blockchain dosyası atomik olarak değiştirildi fakat data klasörü fsync başarısız: {error}"
+                "Blockchain file was replaced atomically, but data directory fsync failed: {error}"
             );
         }
 
@@ -300,7 +311,7 @@ impl Storage {
     }
 
     #[cfg(not(windows))]
-    fn replace_blockchain_file(
+    fn replace_file(
         temp_path: &Path,
         final_path: &Path,
     ) -> std::io::Result<()> {
@@ -308,7 +319,7 @@ impl Storage {
     }
 
     #[cfg(windows)]
-    fn replace_blockchain_file(
+    fn replace_file(
         temp_path: &Path,
         final_path: &Path,
     ) -> std::io::Result<()> {
@@ -392,7 +403,7 @@ impl Storage {
                 Err(error) => {
                     return Err(
                         format!(
-                            "Blockchain dosyası açılamadı: {}",
+                            "Blockchain file could not be opened: {}",
                             error
                         ),
                     );
@@ -408,7 +419,7 @@ impl Storage {
         .map_err(
             |error| {
                 format!(
-                    "Blockchain dosyası okunamadı: {}",
+                    "Blockchain file could not be read: {}",
                     error
                 )
             },
@@ -416,7 +427,7 @@ impl Storage {
 
         if bytes.is_empty() {
             return Err(
-                "Blockchain dosyası boş"
+                "Blockchain file is empty"
                     .into(),
             );
         }
@@ -429,7 +440,7 @@ impl Storage {
             .map_err(
                 |error| {
                     format!(
-                        "Blockchain dosyası geçersiz JSON: {}",
+                        "Blockchain file contains invalid JSON: {}",
                         error
                     )
                 },
@@ -437,7 +448,7 @@ impl Storage {
 
         if chain.is_empty() {
             return Err(
-                "Diskteki blockchain boş"
+                "Stored blockchain is empty"
                     .into(),
             );
         }
@@ -453,7 +464,7 @@ impl Storage {
     ) -> Result<[u8; 32], String> {
         if password.len() < 12 {
             return Err(
-                "Wallet şifresi en az 12 karakter olmalı"
+                "Wallet password must be at least 12 characters long"
                     .into(),
             );
         }
@@ -470,7 +481,7 @@ impl Storage {
             .map_err(
                 |error| {
                     format!(
-                        "Wallet şifre anahtarı türetilemedi: {}",
+                        "Wallet encryption key could not be derived: {}",
                         error
                     )
                 },
@@ -484,7 +495,12 @@ impl Storage {
         alice_private_key: &str,
         bob_private_key: &str,
     ) -> Result<(), String> {
-        Self::ensure_data_directory()?;
+        let data_directory =
+            Self::data_directory();
+
+        Self::ensure_data_directory_at(
+            &data_directory,
+        )?;
 
         let stored_wallets =
             StoredWallets {
@@ -503,7 +519,7 @@ impl Storage {
             .map_err(
                 |error| {
                     format!(
-                        "Wallet verileri JSON'a çevrilemedi: {}",
+                        "Wallet data could not be serialized to JSON: {}",
                         error
                     )
                 },
@@ -532,7 +548,7 @@ impl Storage {
             )
             .map_err(
                 |_| {
-                    "Wallet şifreleme anahtarı geçersiz"
+                    "Wallet encryption key is invalid"
                         .to_string()
                 },
             )?;
@@ -548,7 +564,7 @@ impl Storage {
                 )
                 .map_err(
                     |_| {
-                        "Wallet private key'leri şifrelenemedi"
+                        "Wallet private keys could not be encrypted"
                             .to_string()
                     },
                 )?;
@@ -581,27 +597,34 @@ impl Storage {
             .map_err(
                 |error| {
                     format!(
-                        "Şifreli wallet verileri JSON'a çevrilemedi: {}",
+                        "Encrypted wallet data could not be serialized to JSON: {}",
                         error
                     )
                 },
             )?;
 
         let temp_path =
-            Self::wallets_temp_path();
+            Self::unique_wallet_temp_path(
+                &data_directory,
+            );
 
         let final_path =
-            Self::wallets_path();
+            data_directory.join(
+                WALLETS_FILE_NAME,
+            );
 
         {
             let mut file =
-                File::create(
-                    &temp_path,
-                )
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(
+                        &temp_path,
+                    )
                 .map_err(
                     |error| {
                         format!(
-                            "Geçici wallet dosyası oluşturulamadı: {}",
+                            "Temporary wallet file could not be created: {}",
                             error
                         )
                     },
@@ -613,7 +636,7 @@ impl Storage {
             .map_err(
                 |error| {
                     format!(
-                        "Şifreli wallet verileri diske yazılamadı: {}",
+                        "Encrypted wallet data could not be written to disk: {}",
                         error
                     )
                 },
@@ -623,39 +646,34 @@ impl Storage {
                 .map_err(
                     |error| {
                         format!(
-                            "Wallet dosyası diske senkronize edilemedi: {}",
+                            "Wallet file could not be synchronized to disk: {}",
                             error
                         )
                     },
                 )?;
         }
 
-        if final_path.exists() {
-            fs::remove_file(
-                &final_path,
-            )
-            .map_err(
-                |error| {
-                    format!(
-                        "Eski wallet dosyası silinemedi: {}",
-                        error
-                    )
-                },
-            )?;
-        }
-
-        fs::rename(
+        Self::replace_file(
             &temp_path,
             &final_path,
         )
         .map_err(
             |error| {
                 format!(
-                    "Wallet dosyası aktif konuma taşınamadı: {}",
+                    "Wallet file could not be moved into the active location: {}",
                     error
                 )
             },
         )?;
+
+        #[cfg(unix)]
+        if let Err(error) =
+            File::open(&data_directory).and_then(|directory| directory.sync_all())
+        {
+            eprintln!(
+                "Wallet file was replaced atomically, but data directory fsync failed: {error}"
+            );
+        }
 
         Ok(())
     }
@@ -680,7 +698,7 @@ impl Storage {
             .map_err(
                 |error| {
                     format!(
-                        "Wallet dosyası açılamadı: {}",
+                        "Wallet file could not be opened: {}",
                         error
                     )
                 },
@@ -695,7 +713,7 @@ impl Storage {
         .map_err(
             |error| {
                 format!(
-                    "Wallet dosyası okunamadı: {}",
+                    "Wallet file could not be read: {}",
                     error
                 )
             },
@@ -703,7 +721,7 @@ impl Storage {
 
         if bytes.is_empty() {
             return Err(
-                "Wallet dosyası boş"
+                "Wallet file is empty"
                     .into(),
             );
         }
@@ -719,7 +737,7 @@ impl Storage {
                 != 1
             {
                 return Err(
-                    "Wallet dosyası sürümü desteklenmiyor"
+                    "Wallet file version is not supported"
                         .into(),
                 );
             }
@@ -730,7 +748,7 @@ impl Storage {
                     != "chacha20poly1305"
             {
                 return Err(
-                    "Wallet şifreleme formatı desteklenmiyor"
+                    "Wallet encryption format is not supported"
                         .into(),
                 );
             }
@@ -742,14 +760,14 @@ impl Storage {
                 )
                 .map_err(
                     |_| {
-                        "Wallet salt formatı geçersiz"
+                        "Wallet salt format is invalid"
                             .to_string()
                     },
                 )?;
 
             if salt.len() != 16 {
                 return Err(
-                    "Wallet salt uzunluğu geçersiz"
+                    "Wallet salt length is invalid"
                         .into(),
                 );
             }
@@ -761,7 +779,7 @@ impl Storage {
                 )
                 .map_err(
                     |_| {
-                        "Wallet nonce formatı geçersiz"
+                        "Wallet nonce format is invalid"
                             .to_string()
                     },
                 )?;
@@ -772,7 +790,7 @@ impl Storage {
                     .try_into()
                     .map_err(
                         |_| {
-                            "Wallet nonce uzunluğu geçersiz"
+                            "Wallet nonce length is invalid"
                                 .to_string()
                         },
                     )?;
@@ -784,7 +802,7 @@ impl Storage {
                 )
                 .map_err(
                     |_| {
-                        "Wallet ciphertext formatı geçersiz"
+                        "Wallet ciphertext format is invalid"
                             .to_string()
                     },
                 )?;
@@ -801,7 +819,7 @@ impl Storage {
                 )
                 .map_err(
                     |_| {
-                        "Wallet çözme anahtarı geçersiz"
+                        "Wallet decryption key is invalid"
                             .to_string()
                     },
                 )?;
@@ -819,7 +837,7 @@ impl Storage {
                     )
                     .map_err(
                         |_| {
-                            "Wallet şifresi yanlış veya wallet dosyası bozulmuş"
+                            "Wallet password is incorrect or the wallet file is corrupted"
                                 .to_string()
                         },
                     )?;
@@ -832,7 +850,7 @@ impl Storage {
                 .map_err(
                     |error| {
                         format!(
-                            "Çözülen wallet verileri geçersiz: {}",
+                            "Decrypted wallet data is invalid: {}",
                             error
                         )
                     },
@@ -848,7 +866,7 @@ impl Storage {
             );
         }
 
-        // Eski düz metin wallets.json dosyasını tek seferlik taşı.
+        // Migrate the legacy plaintext wallets.json file once.
         let legacy_wallets:
             StoredWallets =
             serde_json::from_slice(
@@ -856,7 +874,7 @@ impl Storage {
             )
             .map_err(
                 |_| {
-                    "Wallet dosyası geçersiz veya desteklenmeyen formatta"
+                    "Wallet file is invalid or uses an unsupported format"
                         .to_string()
                 },
             )?;
@@ -870,7 +888,7 @@ impl Storage {
         )?;
 
         println!(
-            "🔒 Eski düz metin wallet dosyası şifreli formata taşındı."
+            "Legacy plaintext wallet file was migrated to the encrypted format."
         );
 
         Ok(
@@ -904,7 +922,7 @@ impl Storage {
         .map_err(
             |error| {
                 format!(
-                    "Blockchain dosyası silinemedi: {}",
+                    "Blockchain file could not be deleted: {}",
                     error
                 )
             },
