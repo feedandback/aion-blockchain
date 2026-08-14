@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use kybernetes::bootstrap::canonical_bootstrap;
 use kybernetes::chain::Blockchain;
 use kybernetes::consensus::Consensus;
-use kybernetes::core::Transaction;
+use kybernetes::core::{Block, Transaction};
 use kybernetes::network::tcp::TcpTransport;
 use kybernetes::network::{Network, NetworkMessage, ONE_SHOT_CLIENT_LISTEN_ADDRESS};
 use kybernetes::node::Node;
@@ -84,6 +84,48 @@ async fn wait_for_listener(address: &str) {
     })
     .await
     .expect("runtime listener must become reachable");
+}
+
+fn two_free_loopback_addresses() -> (String, String) {
+    let first = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("first free loopback port must be allocated");
+    let second = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("second free loopback port must be allocated");
+
+    let first_address = first
+        .local_addr()
+        .expect("first allocated loopback address must be readable")
+        .to_string();
+    let second_address = second
+        .local_addr()
+        .expect("second allocated loopback address must be readable")
+        .to_string();
+
+    drop(second);
+    drop(first);
+
+    (first_address, second_address)
+}
+
+async fn wait_for_persisted_chain(
+    data_directory: &Path,
+    expected_height: usize,
+) -> Vec<Block> {
+    tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            if let Some(chain) = Storage::load_blockchain_from(data_directory)
+                .expect("persisted blockchain must remain readable")
+            {
+                if chain.len() >= expected_height {
+                    return chain;
+                }
+            }
+
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("persisted blockchain must reach the expected height")
 }
 
 fn provisioned_identity(
@@ -597,4 +639,189 @@ fn runtime_rebuilds_state_and_nonce_from_persisted_chain() {
         restarted_runtime.node().state.nonce_of(sender.address()),
         1
     );
+}
+
+#[tokio::test]
+async fn two_validator_runtimes_ack_produce_and_propagate_the_same_block() {
+    let producer_directory = TestDirectory::new("two-node-producer");
+    let follower_directory = TestDirectory::new("two-node-follower");
+    let validator_a = Wallet::new();
+    let validator_b = Wallet::new();
+    let consensus = consensus_with(&[&validator_a, &validator_b]);
+    let canonical = canonical_bootstrap().expect("canonical bootstrap must be valid");
+    let genesis = canonical.blockchain.chain[0].clone();
+
+    let selected_address = consensus
+        .select_validator_from_hash(&genesis.hash)
+        .expect("a test validator must be selected")
+        .address
+        .clone();
+
+    let (producer_wallet, follower_wallet) =
+        if selected_address == validator_a.address() {
+            (&validator_a, &validator_b)
+        } else {
+            (&validator_b, &validator_a)
+        };
+
+    let producer_address = producer_wallet.address().to_string();
+    let follower_address = follower_wallet.address().to_string();
+    let producer_key = producer_wallet.private_key_hex();
+    let follower_key = follower_wallet.private_key_hex();
+
+    let build_node = |data_directory: &Path| {
+        let mut blockchain = Blockchain::new(genesis.clone());
+        blockchain
+            .economy
+            .mint(INITIAL_SUPPLY)
+            .expect("test genesis supply must mint");
+
+        let mut state = State::new();
+        state.create_account(producer_address.clone(), INITIAL_SUPPLY);
+        state.create_account(follower_address.clone(), 0);
+
+        Node::new_with_data_directory(
+            blockchain,
+            state,
+            consensus.clone(),
+            data_directory.to_path_buf(),
+        )
+    };
+
+    let (producer_listen_address, follower_listen_address) =
+        two_free_loopback_addresses();
+
+    let mut producer_node = build_node(producer_directory.path());
+    let follower_node = build_node(follower_directory.path());
+
+    assert!(producer_node.add_peer(follower_listen_address.clone()));
+
+    Storage::save_blockchain_to(
+        producer_directory.path(),
+        &producer_node.blockchain.chain,
+    )
+    .expect("producer genesis must be persisted");
+
+    Storage::save_blockchain_to(
+        follower_directory.path(),
+        &follower_node.blockchain.chain,
+    )
+    .expect("follower genesis must be persisted");
+
+    let amount = 1u64;
+    let fee = producer_node.blockchain.economy.calculate_fee(amount);
+    let mut transaction = Transaction::new(
+        producer_address.clone(),
+        producer_wallet.public_key_hex(),
+        follower_address.clone(),
+        amount,
+        fee,
+        0,
+    );
+    transaction.sign(producer_wallet.sign(&transaction.message()));
+    let transaction_id = transaction.id.clone();
+
+    let producer_identity =
+        ValidatorIdentity::from_private_key(&producer_key, &consensus)
+            .expect("selected producer identity must be authorized");
+    let follower_identity =
+        ValidatorIdentity::from_private_key(&follower_key, &consensus)
+            .expect("follower validator identity must be authorized");
+
+    let producer_runtime = NodeRuntime::from_node(
+        producer_node,
+        Some(producer_identity),
+    )
+    .expect("producer runtime must initialize");
+
+    let follower_runtime = NodeRuntime::from_node(
+        follower_node,
+        Some(follower_identity),
+    )
+    .expect("follower runtime must initialize");
+
+    let follower_server_address = follower_listen_address.clone();
+    let follower_server = tokio::spawn(async move {
+        follower_runtime
+            .run(RuntimeConfig {
+                listen_address: follower_server_address,
+                peers: Vec::new(),
+            })
+            .await
+    });
+
+    wait_for_listener(&follower_listen_address).await;
+
+    let producer_server_address = producer_listen_address.clone();
+    let producer_server = tokio::spawn(async move {
+        producer_runtime
+            .run(RuntimeConfig {
+                listen_address: producer_server_address,
+                peers: Vec::new(),
+            })
+            .await
+    });
+
+    wait_for_listener(&producer_listen_address).await;
+
+    let response = TcpTransport::send_authenticated_request(
+        &producer_listen_address,
+        producer_wallet,
+        ONE_SHOT_CLIENT_LISTEN_ADDRESS,
+        &NetworkMessage::Transaction(transaction),
+    )
+    .await
+    .expect("producer runtime must acknowledge the submitted transaction");
+
+    assert!(Network::validate_transaction_ack(
+        &response,
+        &transaction_id,
+    ));
+
+    match response {
+        NetworkMessage::TransactionAck {
+            transaction_id: acknowledged_id,
+            accepted,
+            reason,
+        } => {
+            assert_eq!(acknowledged_id, transaction_id);
+            assert!(accepted);
+            assert_eq!(reason, None);
+        }
+        _ => panic!("producer runtime must return TransactionAck"),
+    }
+
+    let producer_chain =
+        wait_for_persisted_chain(producer_directory.path(), 2).await;
+    let follower_chain =
+        wait_for_persisted_chain(follower_directory.path(), 2).await;
+
+    let producer_tip = producer_chain
+        .last()
+        .expect("producer chain must have a tip");
+    let follower_tip = follower_chain
+        .last()
+        .expect("follower chain must have a tip");
+
+    assert_eq!(producer_chain.len(), 2);
+    assert_eq!(follower_chain.len(), 2);
+    assert_eq!(producer_tip.index, 1);
+    assert_eq!(follower_tip.index, 1);
+    assert_eq!(producer_tip.hash, follower_tip.hash);
+    assert_eq!(producer_tip.validator, selected_address);
+    assert_eq!(follower_tip.validator, selected_address);
+
+    assert!(producer_tip
+        .transactions
+        .iter()
+        .any(|stored| stored.id == transaction_id));
+    assert!(follower_tip
+        .transactions
+        .iter()
+        .any(|stored| stored.id == transaction_id));
+
+    producer_server.abort();
+    follower_server.abort();
+    let _ = producer_server.await;
+    let _ = follower_server.await;
 }
