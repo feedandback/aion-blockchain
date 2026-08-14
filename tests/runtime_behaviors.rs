@@ -825,3 +825,179 @@ async fn two_validator_runtimes_ack_produce_and_propagate_the_same_block() {
     let _ = producer_server.await;
     let _ = follower_server.await;
 }
+
+#[tokio::test]
+async fn late_joining_runtime_catches_up_from_an_existing_peer() {
+    let source_directory = TestDirectory::new("late-join-source");
+    let late_directory = TestDirectory::new("late-join-follower");
+    let validator_a = Wallet::new();
+    let validator_b = Wallet::new();
+    let consensus = consensus_with(&[&validator_a, &validator_b]);
+    let canonical = canonical_bootstrap().expect("canonical bootstrap must be valid");
+    let genesis = canonical.blockchain.chain[0].clone();
+
+    let selected_address = consensus
+        .select_validator_from_hash(&genesis.hash)
+        .expect("a test validator must be selected")
+        .address
+        .clone();
+
+    let (producer_wallet, recipient_wallet) =
+        if selected_address == validator_a.address() {
+            (&validator_a, &validator_b)
+        } else {
+            (&validator_b, &validator_a)
+        };
+
+    let producer_address = producer_wallet.address().to_string();
+    let recipient_address = recipient_wallet.address().to_string();
+
+    let build_genesis_node = |data_directory: &Path| {
+        let mut blockchain = Blockchain::new(genesis.clone());
+        blockchain
+            .economy
+            .mint(INITIAL_SUPPLY)
+            .expect("test genesis supply must mint");
+
+        let mut state = State::new();
+        state.create_account(producer_address.clone(), INITIAL_SUPPLY);
+        state.create_account(recipient_address.clone(), 0);
+
+        Node::new_with_data_directory(
+            blockchain,
+            state,
+            consensus.clone(),
+            data_directory.to_path_buf(),
+        )
+    };
+
+    let mut source_node = build_genesis_node(source_directory.path());
+
+    Storage::save_blockchain_to(
+        source_directory.path(),
+        &source_node.blockchain.chain,
+    )
+    .expect("source genesis must be persisted");
+
+    let amount = 1u64;
+    let fee = source_node.blockchain.economy.calculate_fee(amount);
+    let mut transaction = Transaction::new(
+        producer_address.clone(),
+        producer_wallet.public_key_hex(),
+        recipient_address.clone(),
+        amount,
+        fee,
+        0,
+    );
+    transaction.sign(producer_wallet.sign(&transaction.message()));
+    let transaction_id = transaction.id.clone();
+
+    assert!(source_node.add_transaction(transaction));
+
+    let producer_identity = ValidatorIdentity::from_private_key(
+        &producer_wallet.private_key_hex(),
+        &consensus,
+    )
+    .expect("selected source validator must be authorized");
+
+    let mut source_runtime =
+        NodeRuntime::from_node(source_node, Some(producer_identity))
+            .expect("source runtime must initialize");
+
+    let produced = source_runtime
+        .try_produce_block(GENESIS_TIMESTAMP + 1)
+        .expect("selected source validator must produce a block");
+
+    assert_eq!(source_runtime.node().blockchain.height(), 2);
+    assert_eq!(produced.validator, selected_address);
+    assert!(produced
+        .transactions
+        .iter()
+        .any(|stored| stored.id == transaction_id));
+
+    let late_node = build_genesis_node(late_directory.path());
+
+    Storage::save_blockchain_to(
+        late_directory.path(),
+        &late_node.blockchain.chain,
+    )
+    .expect("late node genesis must be persisted");
+
+    assert_eq!(late_node.blockchain.height(), 1);
+
+    let late_runtime =
+        NodeRuntime::from_node(late_node, None)
+            .expect("late observer runtime must initialize");
+
+    let (source_listen_address, late_listen_address) =
+        two_free_loopback_addresses();
+
+    let source_server_address = source_listen_address.clone();
+    let source_server = tokio::spawn(async move {
+        source_runtime
+            .run(RuntimeConfig {
+                listen_address: source_server_address,
+                peers: Vec::new(),
+            })
+            .await
+    });
+
+    wait_for_listener(&source_listen_address).await;
+
+    let late_server_address = late_listen_address.clone();
+    let source_peer = source_listen_address.clone();
+    let late_server = tokio::spawn(async move {
+        late_runtime
+            .run(RuntimeConfig {
+                listen_address: late_server_address,
+                peers: vec![source_peer],
+            })
+            .await
+    });
+
+    wait_for_listener(&late_listen_address).await;
+
+    let synchronized_chain =
+        wait_for_persisted_chain(late_directory.path(), 2).await;
+
+    assert_eq!(synchronized_chain.len(), 2);
+
+    let synchronized_tip = synchronized_chain
+        .last()
+        .expect("synchronized late node chain must have a tip");
+
+    assert_eq!(synchronized_tip.index, 1);
+    assert_eq!(synchronized_tip.hash, produced.hash);
+    assert_eq!(synchronized_tip.validator, selected_address);
+    assert!(synchronized_tip
+        .transactions
+        .iter()
+        .any(|stored| stored.id == transaction_id));
+
+    let source_chain = Storage::load_blockchain_from(source_directory.path())
+        .expect("source persisted chain must be readable")
+        .expect("source persisted chain must exist");
+
+    assert_eq!(source_chain.len(), synchronized_chain.len());
+    assert_eq!(
+        source_chain
+            .last()
+            .expect("source chain must have a tip")
+            .hash,
+        synchronized_tip.hash
+    );
+
+    let mut replay_node = build_genesis_node(late_directory.path());
+    replay_node
+        .restore_chain_from_storage(synchronized_chain)
+        .expect("synchronized chain must replay after catch-up");
+
+    assert_eq!(replay_node.blockchain.height(), 2);
+    assert_eq!(replay_node.state.balance_of(&recipient_address), amount);
+    assert_eq!(replay_node.state.nonce_of(&producer_address), 1);
+
+    late_server.abort();
+    source_server.abort();
+    let _ = late_server.await;
+    let _ = source_server.await;
+}
