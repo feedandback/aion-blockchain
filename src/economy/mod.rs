@@ -1,18 +1,13 @@
 use crate::protocol::{
-    BLOCK_REWARD_MICRO_KBN,
-    BURN_FEE_PERCENT,
-    LIQUIDITY_RESERVE_FEE_PERCENT,
-    MAX_SUPPLY_MICRO_KBN,
-    MIN_TRANSACTION_FEE_MICRO_KBN,
-    TRANSACTION_FEE_DIVISOR,
-    TREASURY_FEE_PERCENT,
+    BLOCK_REWARD_MICRO_KBN, BURN_FEE_PERCENT, LIQUIDITY_RESERVE_FEE_PERCENT, MAX_SUPPLY_MICRO_KBN,
+    MIN_TRANSACTION_FEE_MICRO_KBN, TRANSACTION_FEE_DIVISOR, TREASURY_FEE_PERCENT,
     VALIDATOR_FEE_PERCENT,
 };
 
 #[derive(Debug, Clone)]
 pub struct Economy {
     // Micro unit
-    // 1 KBN = 1.000.000 unit
+    // 1 KBN = 1,000,000 units
     pub total_supply: u64,
 
     pub max_supply: u64,
@@ -23,13 +18,13 @@ pub struct Economy {
     // Minimum transaction fee
     pub minimum_fee: u64,
 
-    // Transaction fee oranının böleni
+    // Transaction fee divisor
     pub fee_divisor: u64,
 
-    // Network fee'lerinden biriken Liquidity Reserve
+    // Liquidity Reserve accumulated from network fees
     pub liquidity_reserve: u64,
 
-    // Fee dağılımı
+    // Fee distribution
     #[allow(dead_code)]
     pub validator_fee_percent: u64,
 
@@ -41,16 +36,22 @@ pub struct Economy {
     pub burn_fee_percent: u64,
 }
 
+impl Default for Economy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Economy {
     pub fn new() -> Self {
         Self {
-            // Genesis başlangıç arzı
+            // Genesis initial supply
             total_supply: 0,
 
-            // 100 milyon KBN
+            // 100 million KBN
             max_supply: MAX_SUPPLY_MICRO_KBN,
 
-            // Validator ödülü
+            // Validator reward
             block_reward: BLOCK_REWARD_MICRO_KBN,
 
             // Minimum fee
@@ -75,124 +76,63 @@ impl Economy {
     // TRANSACTION FEE
     // ==========================
 
-    pub fn calculate_fee(
-        &self,
-        amount: u64,
-    ) -> u64 {
-        let percentage_fee =
-            amount / self.fee_divisor.max(1);
+    pub fn calculate_fee(&self, amount: u64) -> u64 {
+        let percentage_fee = amount / self.fee_divisor.max(1);
 
-        percentage_fee.max(
-            self.minimum_fee,
-        )
+        percentage_fee.max(self.minimum_fee)
     }
 
     // ==========================
-    // FEE DOĞRULAMA
+    // FEE VALIDATION
     // ==========================
 
-    pub fn validate_fee(
-        &self,
-        amount: u64,
-        fee: u64,
-    ) -> bool {
+    pub fn validate_fee(&self, amount: u64, fee: u64) -> bool {
         fee == self.calculate_fee(amount)
     }
 
     // ==========================
-    // FEE DAĞITIMI
+    // FEE DISTRIBUTION
     // ==========================
 
-    pub fn distribute_fee(
-        &self,
-        fee: u64,
-    ) -> (u64, u64, u64, u64) {
+    pub fn distribute_fee(&self, fee: u64) -> (u64, u64, u64, u64) {
         let liquidity =
-            u64::try_from(
-                u128::from(fee)
-                    * u128::from(
-                        self.liquidity_fee_percent,
-                    )
-                    / 100,
-            )
-            .expect(
-                "Liquidity Reserve fee u64 aralığını aşıyor",
-            );
+            u64::try_from(u128::from(fee) * u128::from(self.liquidity_fee_percent) / 100)
+                .expect("Liquidity Reserve fee exceeds u64 range");
 
-        let treasury =
-            u64::try_from(
-                u128::from(fee)
-                    * u128::from(
-                        self.treasury_fee_percent,
-                    )
-                    / 100,
-            )
-            .expect(
-                "Treasury fee u64 aralığını aşıyor",
-            );
+        let treasury = u64::try_from(u128::from(fee) * u128::from(self.treasury_fee_percent) / 100)
+            .expect("Treasury fee exceeds u64 range");
 
         let burn = 0;
 
-        let validator =
-            fee.checked_sub(
-                liquidity,
-            )
-            .and_then(
-                |remaining| {
-                    remaining.checked_sub(
-                        treasury,
-                    )
-                },
-            )
-            .expect(
-                "Liquidity Reserve ve treasury payları toplam fee'yi aşıyor",
-            );
+        let validator = fee
+            .checked_sub(liquidity)
+            .and_then(|remaining| remaining.checked_sub(treasury))
+            .expect("Liquidity Reserve and treasury shares exceed the total fee");
 
-        (
-            validator,
-            liquidity,
-            treasury,
-            burn,
-        )
+        (validator, liquidity, treasury, burn)
     }
 
-    pub fn add_liquidity_reserve(
-        &mut self,
-        amount: u64,
-    ) -> Result<(), String> {
-        self.liquidity_reserve =
-            self.liquidity_reserve
-                .checked_add(amount)
-                .ok_or(
-                    "Liquidity Reserve overflow",
-                )?;
+    pub fn add_liquidity_reserve(&mut self, amount: u64) -> Result<(), String> {
+        self.liquidity_reserve = self
+            .liquidity_reserve
+            .checked_add(amount)
+            .ok_or("Liquidity Reserve overflow")?;
 
         Ok(())
     }
 
     #[allow(dead_code)]
-    pub fn liquidity_reserve(
-        &self,
-    ) -> u64 {
+    pub fn liquidity_reserve(&self) -> u64 {
         self.liquidity_reserve
     }
 
     // ==========================
-    // MINT KONTROLÜ
+    // MINT VALIDATION
     // ==========================
 
-    pub fn can_mint(
-        &self,
-        amount: u64,
-    ) -> bool {
-        match self
-            .total_supply
-            .checked_add(amount)
-        {
-            Some(new_supply) => {
-                new_supply
-                    <= self.max_supply
-            }
+    pub fn can_mint(&self, amount: u64) -> bool {
+        match self.total_supply.checked_add(amount) {
+            Some(new_supply) => new_supply <= self.max_supply,
 
             None => false,
         }
@@ -202,15 +142,9 @@ impl Economy {
     // MINT
     // ==========================
 
-    pub fn mint(
-        &mut self,
-        amount: u64,
-    ) -> Result<(), String> {
+    pub fn mint(&mut self, amount: u64) -> Result<(), String> {
         if !self.can_mint(amount) {
-            return Err(
-                "Maksimum arz aşıldı"
-                    .into(),
-            );
+            return Err("Maximum supply exceeded".into());
         }
 
         self.total_supply += amount;
@@ -222,10 +156,7 @@ impl Economy {
     // BURN
     // ==========================
 
-    pub fn burn(
-        &mut self,
-        amount: u64,
-    ) {
+    pub fn burn(&mut self, amount: u64) {
         if self.total_supply >= amount {
             self.total_supply -= amount;
         }
@@ -235,11 +166,8 @@ impl Economy {
     // VALIDATOR REWARD
     // ==========================
 
-    pub fn reward_validator(
-        &mut self,
-    ) -> Result<u64, String> {
-        let reward =
-            self.block_reward;
+    pub fn reward_validator(&mut self) -> Result<u64, String> {
+        let reward = self.block_reward;
 
         self.mint(reward)?;
 

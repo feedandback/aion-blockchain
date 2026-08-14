@@ -2,21 +2,12 @@ use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::core::{Block, Transaction};
-use crate::protocol::{
-    is_fixed_hex,
-    ADDRESS_HEX_LENGTH,
-    GENESIS_PREVIOUS_HASH,
-    GENESIS_VALIDATOR,
-    HASH_HEX_LENGTH,
-    MAX_FUTURE_DRIFT_SECONDS,
-    MAX_TOTAL_TRANSACTIONS_PER_BLOCK,
-    PUBLIC_KEY_HEX_LENGTH,
-    SIGNATURE_HEX_LENGTH,
-    SYSTEM_ADDRESS,
-    SYSTEM_PUBLIC_KEY,
-    SYSTEM_REWARD_SIGNATURE,
-};
 use crate::economy::Economy;
+use crate::protocol::{
+    ADDRESS_HEX_LENGTH, GENESIS_PREVIOUS_HASH, GENESIS_VALIDATOR, HASH_HEX_LENGTH,
+    MAX_FUTURE_DRIFT_SECONDS, MAX_TOTAL_TRANSACTIONS_PER_BLOCK, PUBLIC_KEY_HEX_LENGTH,
+    SIGNATURE_HEX_LENGTH, SYSTEM_ADDRESS, SYSTEM_PUBLIC_KEY, SYSTEM_REWARD_SIGNATURE, is_fixed_hex,
+};
 use crate::state::State;
 use crate::wallet::Wallet;
 
@@ -29,142 +20,72 @@ pub struct Blockchain {
 }
 
 impl Blockchain {
-    
-
-    fn validate_transaction_field_sizes(
-        transaction: &Transaction,
-    ) -> Result<(), String> {
-        if !is_fixed_hex(
-            &transaction.id,
-            HASH_HEX_LENGTH,
-        ) {
-            return Err(
-                "Transaction ID formatı geçersiz"
-                    .into(),
-            );
+    fn validate_transaction_field_sizes(transaction: &Transaction) -> Result<(), String> {
+        if !is_fixed_hex(&transaction.id, HASH_HEX_LENGTH) {
+            return Err("Transaction ID format is invalid".into());
         }
 
         if transaction.coinbase {
-            if transaction.from != SYSTEM_ADDRESS
-                || transaction.public_key
-                    != SYSTEM_PUBLIC_KEY
-            {
-                return Err(
-                    "Coinbase SYSTEM alanları geçersiz"
-                        .into(),
-                );
+            if transaction.from != SYSTEM_ADDRESS || transaction.public_key != SYSTEM_PUBLIC_KEY {
+                return Err("Coinbase SYSTEM fields are invalid".into());
             }
 
-            if !is_fixed_hex(
-                &transaction.to,
-                ADDRESS_HEX_LENGTH,
-            ) {
-                return Err(
-                    "Coinbase alıcı adres formatı geçersiz"
-                        .into(),
-                );
+            if !is_fixed_hex(&transaction.to, ADDRESS_HEX_LENGTH) {
+                return Err("Coinbase recipient address format is invalid".into());
             }
 
             match transaction.signature.as_ref() {
-                Some(signature)
-                    if signature
-                        == SYSTEM_REWARD_SIGNATURE => {}
+                Some(signature) if signature == SYSTEM_REWARD_SIGNATURE => {}
 
                 _ => {
-                    return Err(
-                        "Coinbase imza formatı geçersiz"
-                            .into(),
-                    );
+                    return Err("Coinbase signature format is invalid".into());
                 }
             }
 
             return Ok(());
         }
 
-        if !is_fixed_hex(
-            &transaction.from,
-            ADDRESS_HEX_LENGTH,
-        )
-            || !is_fixed_hex(
-                &transaction.to,
-                ADDRESS_HEX_LENGTH,
-            )
+        if !is_fixed_hex(&transaction.from, ADDRESS_HEX_LENGTH)
+            || !is_fixed_hex(&transaction.to, ADDRESS_HEX_LENGTH)
         {
-            return Err(
-                "Transaction adres formatı geçersiz"
-                    .into(),
-            );
+            return Err("Transaction address format is invalid".into());
         }
 
-        if !is_fixed_hex(
-            &transaction.public_key,
-            PUBLIC_KEY_HEX_LENGTH,
-        ) {
-            return Err(
-                "Transaction public key formatı geçersiz"
-                    .into(),
-            );
+        if !is_fixed_hex(&transaction.public_key, PUBLIC_KEY_HEX_LENGTH) {
+            return Err("Transaction public key format is invalid".into());
         }
 
-        let signature =
-            transaction
-                .signature
-                .as_ref()
-                .ok_or(
-                    "Transaction imzası yok",
-                )?;
+        let signature = transaction
+            .signature
+            .as_ref()
+            .ok_or("Transaction signature is missing")?;
 
-        if !is_fixed_hex(
-            signature,
-            SIGNATURE_HEX_LENGTH,
-        ) {
-            return Err(
-                "Transaction imza formatı geçersiz"
-                    .into(),
-            );
+        if !is_fixed_hex(signature, SIGNATURE_HEX_LENGTH) {
+            return Err("Transaction signature format is invalid".into());
         }
 
         Ok(())
     }
 
-    fn validate_block_field_sizes(
-        block: &Block,
-    ) -> Result<(), String> {
-        if block.transactions.len()
-            > MAX_TOTAL_TRANSACTIONS_PER_BLOCK
-        {
-            return Err(
-                "Block transaction limiti aşıldı"
-                    .into(),
-            );
+    fn validate_block_field_sizes(block: &Block) -> Result<(), String> {
+        if block.transactions.len() > MAX_TOTAL_TRANSACTIONS_PER_BLOCK {
+            return Err("Block transaction limit exceeded".into());
         }
 
-        if !is_fixed_hex(
-            &block.hash,
-            HASH_HEX_LENGTH,
-        ) {
-            return Err(
-                "Block hash formatı geçersiz"
-                    .into(),
-            );
+        if !is_fixed_hex(&block.hash, HASH_HEX_LENGTH) {
+            return Err("Block hash format is invalid".into());
         }
 
-        // Genesis mevcut Kybernetes protokolünde özel formattadır.
-        // validator_public_key alanı canonical genesis config fingerprint'ini taşır.
+        // Genesis uses a special format in the current Kybernetes protocol.
+        // validator_public_key carries the canonical genesis config fingerprint.
         if block.index == 0 {
             if block.previous_hash != GENESIS_PREVIOUS_HASH
                 || block.validator != GENESIS_VALIDATOR
-                || !is_fixed_hex(
-                    &block.validator_public_key,
-                    HASH_HEX_LENGTH,
-                )
+                || !is_fixed_hex(&block.validator_public_key, HASH_HEX_LENGTH)
                 || block.validator_signature.is_some()
                 || !block.transactions.is_empty()
             {
-                return Err(
-                    "Genesis block formatı geçersiz"
-                        .into(),
-                );
+                return Err("Genesis block format is invalid".into());
             }
 
             return Ok(());
@@ -175,101 +96,49 @@ impl Blockchain {
             .iter()
             .any(|transaction| !transaction.coinbase)
         {
-            return Err(
-                "Genesis dışı block en az bir normal transaction içermeli"
-                    .into(),
-            );
+            return Err("Non-genesis block must contain at least one normal transaction".into());
         }
 
-        if !is_fixed_hex(
-            &block.previous_hash,
-            HASH_HEX_LENGTH,
-        ) {
-            return Err(
-                "Block previous hash formatı geçersiz"
-                    .into(),
-            );
+        if !is_fixed_hex(&block.previous_hash, HASH_HEX_LENGTH) {
+            return Err("Block previous hash format is invalid".into());
         }
 
-        if !is_fixed_hex(
-            &block.validator,
-            ADDRESS_HEX_LENGTH,
-        ) {
-            return Err(
-                "Block validator adres formatı geçersiz"
-                    .into(),
-            );
+        if !is_fixed_hex(&block.validator, ADDRESS_HEX_LENGTH) {
+            return Err("Block validator address format is invalid".into());
         }
 
-        if !is_fixed_hex(
-            &block.validator_public_key,
-            PUBLIC_KEY_HEX_LENGTH,
-        ) {
-            return Err(
-                "Block validator public key formatı geçersiz"
-                    .into(),
-            );
+        if !is_fixed_hex(&block.validator_public_key, PUBLIC_KEY_HEX_LENGTH) {
+            return Err("Block validator public key format is invalid".into());
         }
 
-        let validator_signature =
-            block
-                .validator_signature
-                .as_ref()
-                .ok_or(
-                    "Block validator imzası yok",
-                )?;
+        let validator_signature = block
+            .validator_signature
+            .as_ref()
+            .ok_or("Block validator signature is missing")?;
 
-        if !is_fixed_hex(
-            validator_signature,
-            SIGNATURE_HEX_LENGTH,
-        ) {
-            return Err(
-                "Block validator imza formatı geçersiz"
-                    .into(),
-            );
+        if !is_fixed_hex(validator_signature, SIGNATURE_HEX_LENGTH) {
+            return Err("Block validator signature format is invalid".into());
         }
 
-        for transaction in
-            &block.transactions
-        {
-            Self::validate_transaction_field_sizes(
-                transaction,
-            )?;
+        for transaction in &block.transactions {
+            Self::validate_transaction_field_sizes(transaction)?;
         }
 
         Ok(())
     }
 
-    fn validate_transaction_id_uniqueness(
-        &self,
-        block: &Block,
-    ) -> Result<(), String> {
-        let mut seen_ids:
-            HashSet<&str> =
-            self.chain
-                .iter()
-                .flat_map(
-                    |existing_block| {
-                        existing_block
-                            .transactions
-                            .iter()
-                    },
-                )
-                .map(
-                    |transaction| {
-                        transaction.id.as_str()
-                    },
-                )
-                .collect();
+    fn validate_transaction_id_uniqueness(&self, block: &Block) -> Result<(), String> {
+        let mut seen_ids: HashSet<&str> = self
+            .chain
+            .iter()
+            .flat_map(|existing_block| existing_block.transactions.iter())
+            .map(|transaction| transaction.id.as_str())
+            .collect();
 
-        for transaction in
-            &block.transactions
-        {
-            if !seen_ids.insert(
-                transaction.id.as_str(),
-            ) {
+        for transaction in &block.transactions {
+            if !seen_ids.insert(transaction.id.as_str()) {
                 return Err(format!(
-                    "Transaction ID daha önce kullanılmış. TX: {}",
+                    "Transaction ID was already used. TX: {}",
                     transaction.id
                 ));
             }
@@ -278,52 +147,28 @@ impl Blockchain {
         Ok(())
     }
 
-    fn current_unix_timestamp(
-    ) -> Result<u64, String> {
+    fn current_unix_timestamp() -> Result<u64, String> {
         SystemTime::now()
-            .duration_since(
-                UNIX_EPOCH,
-            )
-            .map(
-                |duration| {
-                    duration.as_secs()
-                },
-            )
-            .map_err(
-                |_| {
-                    "Sistem zamanı UNIX epoch öncesinde"
-                        .into()
-                },
-            )
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .map_err(|_| "System time is before the UNIX epoch".into())
     }
 
-    fn validate_future_timestamp(
-        timestamp: u64,
-    ) -> Result<(), String> {
-        let now =
-            Self::current_unix_timestamp()?;
+    fn validate_future_timestamp(timestamp: u64) -> Result<(), String> {
+        let now = Self::current_unix_timestamp()?;
 
-        let maximum_allowed =
-            now.checked_add(
-                MAX_FUTURE_DRIFT_SECONDS,
-            )
-            .ok_or(
-                "Timestamp üst sınırı overflow",
-            )?;
+        let maximum_allowed = now
+            .checked_add(MAX_FUTURE_DRIFT_SECONDS)
+            .ok_or("Timestamp upper bound overflow")?;
 
         if timestamp > maximum_allowed {
-            return Err(
-                "Block timestamp izin verilen gelecek zaman sınırını aşıyor"
-                    .into(),
-            );
+            return Err("Block timestamp exceeds the allowed future-time limit".into());
         }
 
         Ok(())
     }
 
-    pub fn new(
-        genesis: Block,
-    ) -> Self {
+    pub fn new(genesis: Block) -> Self {
         Self {
             chain: vec![genesis],
             economy: Economy::new(),
@@ -331,7 +176,7 @@ impl Blockchain {
     }
 
     // ==========================
-    // BLOCK ÜRET
+    // PRODUCE BLOCK
     // ==========================
 
     pub fn create_block_from_mempool(
@@ -342,424 +187,241 @@ impl Blockchain {
         state: &mut State,
     ) -> Result<Block, String> {
         if mempool.is_empty() {
-            return Err(
-                "Mempool boş".into(),
-            );
+            return Err("Mempool is empty".into());
         }
 
         // ==========================
-        // TIMESTAMP KONTROLÜ
+        // TIMESTAMP CHECK
         // ==========================
 
-        let last_block =
-            self.chain
-                .last()
-                .ok_or(
-                    "Blockchain boş",
-                )?;
+        let last_block = self.chain.last().ok_or("Blockchain is empty")?;
 
-        if timestamp
-            <= last_block.timestamp
-        {
+        if timestamp <= last_block.timestamp {
             return Err(
-                "Yeni block timestamp önceki block timestamp'inden büyük olmalı"
-                    .into(),
+                "New block timestamp must be greater than the previous block timestamp".into(),
             );
         }
 
-        Self::validate_future_timestamp(
-            timestamp,
-        )?;
+        Self::validate_future_timestamp(timestamp)?;
 
         // ==========================
-        // GEÇİCİ KOPYALAR
+        // TEMPORARY COPIES
         // ==========================
 
-        let mut candidate_state =
-            state.clone();
+        let mut candidate_state = state.clone();
 
-        let mut candidate_economy =
-            self.economy.clone();
+        let mut candidate_economy = self.economy.clone();
 
-        let mut candidate_mempool =
-            Mempool {
-                transactions:
-                    mempool.transactions.clone(),
-            };
+        let mut candidate_mempool = Mempool {
+            transactions: mempool.transactions.clone(),
+        };
 
         // ==========================
-        // GEÇERLİ TRANSACTION'LAR
+        // VALID TRANSACTIONS
         // ==========================
 
-        let mut transactions =
-            candidate_mempool
-                .take_valid_transactions(
-                    &candidate_state,
-                );
+        let mut transactions = candidate_mempool.take_valid_transactions(&candidate_state);
 
         if transactions.is_empty() {
-            return Err(
-                "Geçerli transaction yok".into(),
-            );
+            return Err("No valid transactions".into());
         }
 
         // ==========================
-        // FEE KONTROLÜ
+        // FEE CHECK
         // ==========================
 
-        for transaction
-            in &transactions
-        {
-            if !candidate_economy
-                .validate_fee(
-                    transaction.amount,
-                    transaction.fee,
-                )
-            {
+        for transaction in &transactions {
+            if !candidate_economy.validate_fee(transaction.amount, transaction.fee) {
                 return Err(format!(
-                    "Transaction fee geçersiz. TX: {}",
+                    "Transaction fee is invalid. TX: {}",
                     transaction.id
                 ));
             }
         }
 
         // ==========================
-        // NORMAL TRANSACTION'LAR
+        // NORMAL TRANSACTIONS
         // ==========================
 
-        candidate_state
-            .apply_transactions_atomically(
-                &transactions,
-            )?;
+        candidate_state.apply_transactions_atomically(&transactions)?;
 
         // ==========================
-        // FEE DAĞITIMI
+        // FEE DISTRIBUTION
         // ==========================
 
-        let mut validator_fee_total =
-            0u64;
+        let mut validator_fee_total = 0u64;
 
-        let mut liquidity_fee_total =
-            0u64;
+        let mut liquidity_fee_total = 0u64;
 
-        let mut treasury_fee_total =
-            0u64;
+        let mut treasury_fee_total = 0u64;
 
-        let mut burn_fee_total =
-            0u64;
+        let mut burn_fee_total = 0u64;
 
-        for transaction
-            in &transactions
-        {
-            let (
-                validator_fee,
-                liquidity_fee,
-                treasury_fee,
-                burn_fee,
-            ) = candidate_economy
-                .distribute_fee(
-                    transaction.fee,
-                );
+        for transaction in &transactions {
+            let (validator_fee, liquidity_fee, treasury_fee, burn_fee) =
+                candidate_economy.distribute_fee(transaction.fee);
 
-            validator_fee_total =
-                validator_fee_total
-                    .checked_add(
-                        validator_fee,
-                    )
-                    .ok_or(
-                        "Validator fee overflow",
-                    )?;
+            validator_fee_total = validator_fee_total
+                .checked_add(validator_fee)
+                .ok_or("Validator fee overflow")?;
 
-            liquidity_fee_total =
-                liquidity_fee_total
-                    .checked_add(
-                        liquidity_fee,
-                    )
-                    .ok_or(
-                        "Liquidity Reserve fee overflow",
-                    )?;
+            liquidity_fee_total = liquidity_fee_total
+                .checked_add(liquidity_fee)
+                .ok_or("Liquidity Reserve fee overflow")?;
 
-            treasury_fee_total =
-                treasury_fee_total
-                    .checked_add(
-                        treasury_fee,
-                    )
-                    .ok_or(
-                        "Treasury fee overflow",
-                    )?;
+            treasury_fee_total = treasury_fee_total
+                .checked_add(treasury_fee)
+                .ok_or("Treasury fee overflow")?;
 
-            burn_fee_total =
-                burn_fee_total
-                    .checked_add(
-                        burn_fee,
-                    )
-                    .ok_or(
-                        "Burn fee overflow",
-                    )?;
+            burn_fee_total = burn_fee_total
+                .checked_add(burn_fee)
+                .ok_or("Burn fee overflow")?;
         }
 
         // ==========================
-        // VALIDATOR HESABI
+        // VALIDATOR ACCOUNT
         // ==========================
 
         if !candidate_state
             .accounts
-            .contains_key(
-                validator_wallet.address(),
-            )
+            .contains_key(validator_wallet.address())
         {
-            candidate_state
-                .create_account(
-                    validator_wallet
-                        .address()
-                        .to_string(),
-                    0,
-                );
+            candidate_state.create_account(validator_wallet.address().to_string(), 0);
         }
 
         // ==========================
         // VALIDATOR FEE
         // ==========================
 
-        candidate_state
-            .add_balance(
-                validator_wallet.address(),
-                validator_fee_total,
-            )?;
+        candidate_state.add_balance(validator_wallet.address(), validator_fee_total)?;
 
         // ==========================
         // TREASURY
         // ==========================
 
-        candidate_state
-            .add_treasury(
-                treasury_fee_total,
-            )?;
+        candidate_state.add_treasury(treasury_fee_total)?;
 
         // ==========================
         // LIQUIDITY RESERVE
         // ==========================
 
-        candidate_economy
-            .add_liquidity_reserve(
-                liquidity_fee_total,
-            )?;
+        candidate_economy.add_liquidity_reserve(liquidity_fee_total)?;
 
         // ==========================
         // BURN
         // ==========================
 
-        candidate_state
-            .burn(
-                burn_fee_total,
-            )?;
+        candidate_state.burn(burn_fee_total)?;
 
-        candidate_economy
-            .burn(
-                burn_fee_total,
-            );
+        candidate_economy.burn(burn_fee_total);
 
         // ==========================
-        // BLOCK BİLGİLERİ
+        // BLOCK INFORMATION
         // ==========================
 
-        let index =
-            self.chain.len() as u64;
+        let index = self.chain.len() as u64;
 
-        let previous_hash =
-            last_block
-                .hash
-                .clone();
+        let previous_hash = last_block.hash.clone();
 
         // ==========================
         // COINBASE REWARD
         // ==========================
 
-        let reward =
-            candidate_economy
-                .reward_validator()?;
+        let reward = candidate_economy.reward_validator()?;
 
         let coinbase =
-            Transaction::new_coinbase(
-                validator_wallet
-                    .address()
-                    .to_string(),
-                reward,
-                index,
-            );
+            Transaction::new_coinbase(validator_wallet.address().to_string(), reward, index);
 
-        candidate_state
-            .apply_transaction(
-                &coinbase,
-            )?;
+        candidate_state.apply_transaction(&coinbase)?;
 
-        transactions.push(
-            coinbase,
+        transactions.push(coinbase);
+
+        // ==========================
+        // CREATE BLOCK
+        // ==========================
+
+        let mut block = Block::new(
+            index,
+            timestamp,
+            previous_hash,
+            validator_wallet.address().to_string(),
+            validator_wallet.public_key_hex(),
+            transactions.clone(),
         );
 
         // ==========================
-        // BLOCK OLUŞTUR
+        // SIGN BLOCK
         // ==========================
 
-        let mut block =
-            Block::new(
-                index,
-                timestamp,
-                previous_hash,
-                validator_wallet
-                    .address()
-                    .to_string(),
-                validator_wallet
-                    .public_key_hex(),
-                transactions.clone(),
-            );
+        let signature = validator_wallet.sign(block.hash.as_bytes());
+
+        block.sign(signature);
+
+        Self::validate_block_field_sizes(&block)?;
+
+        self.validate_transaction_id_uniqueness(&block)?;
 
         // ==========================
-        // BLOCK İMZALA
+        // CONFIRMED TX IDS
         // ==========================
 
-        let signature =
-            validator_wallet.sign(
-                block.hash.as_bytes(),
-            );
-
-        block.sign(
-            signature,
-        );
-
-        Self::validate_block_field_sizes(
-            &block,
-        )?;
-
-        self.validate_transaction_id_uniqueness(
-            &block,
-        )?;
+        let confirmed_transaction_ids: Vec<String> = transactions
+            .iter()
+            .filter(|transaction| !transaction.coinbase)
+            .map(|transaction| transaction.id.clone())
+            .collect();
 
         // ==========================
-        // ONAYLANAN TX ID'LERİ
+        // ATOMIC COMMIT
         // ==========================
 
-        let confirmed_transaction_ids:
-            Vec<String> =
-            transactions
+        *state = candidate_state;
+
+        self.economy = candidate_economy;
+
+        mempool.transactions.retain(|pending_transaction| {
+            !confirmed_transaction_ids
                 .iter()
-                .filter(
-                    |transaction| {
-                        !transaction.coinbase
-                    },
-                )
-                .map(
-                    |transaction| {
-                        transaction.id.clone()
-                    },
-                )
-                .collect();
+                .any(|confirmed_id| confirmed_id == &pending_transaction.id)
+        });
 
-        // ==========================
-        // ATOMİK COMMIT
-        // ==========================
+        self.chain.push(block.clone());
 
-        *state =
-            candidate_state;
-
-        self.economy =
-            candidate_economy;
-
-        mempool
-            .transactions
-            .retain(
-                |pending_transaction| {
-                    !confirmed_transaction_ids
-                        .iter()
-                        .any(
-                            |confirmed_id| {
-                                confirmed_id
-                                    == &pending_transaction.id
-                            },
-                        )
-                },
-            );
-
-        self.chain.push(
-            block.clone(),
-        );
-
-        println!(
-            "💰 Toplam KBN arzı: {}",
-            self.economy
-                .supply()
-                / 1_000_000
-        );
+        println!(" Total KBN supply: {}", self.economy.supply() / 1_000_000);
 
         Ok(block)
     }
 
     // ==========================
-    // GELEN BLOCK EKLE
+    // ADD RECEIVED BLOCK
     // ==========================
 
-    pub fn add_received_block(
-        &mut self,
-        block: Block,
-    ) -> Result<(), String> {
-        Self::validate_block_field_sizes(
-            &block,
-        )?;
+    pub fn add_received_block(&mut self, block: Block) -> Result<(), String> {
+        Self::validate_block_field_sizes(&block)?;
 
-        self.validate_transaction_id_uniqueness(
-            &block,
-        )?;
+        self.validate_transaction_id_uniqueness(&block)?;
 
-        let last_block =
-            self.chain
-                .last()
-                .ok_or(
-                    "Blockchain boş",
-                )?;
+        let last_block = self.chain.last().ok_or("Blockchain is empty")?;
 
-        if block.previous_hash
-            != last_block.hash
-        {
-            return Err(
-                "Önceki hash uyuşmuyor"
-                    .into(),
-            );
+        if block.previous_hash != last_block.hash {
+            return Err("Previous hash does not match".into());
         }
 
-        if block.timestamp
-            <= last_block.timestamp
-        {
-            return Err(
-                "Block timestamp önceki block timestamp'inden büyük olmalı"
-                    .into(),
-            );
+        if block.timestamp <= last_block.timestamp {
+            return Err("Block timestamp must be greater than the previous block timestamp".into());
         }
 
-        Self::validate_future_timestamp(
-            block.timestamp,
-        )?;
+        Self::validate_future_timestamp(block.timestamp)?;
 
-        if block.hash
-            != block.calculate_hash()
-        {
-            return Err(
-                "Block hash geçersiz"
-                    .into(),
-            );
+        if block.hash != block.calculate_hash() {
+            return Err("Block hash is invalid".into());
         }
 
-        if block.index
-            != self.chain.len() as u64
-        {
-            return Err(
-                "Block index hatalı"
-                    .into(),
-            );
+        if block.index != self.chain.len() as u64 {
+            return Err("Block index is invalid".into());
         }
 
-        self.chain.push(
-            block,
-        );
+        self.chain.push(block);
 
         Ok(())
     }
@@ -768,36 +430,19 @@ impl Blockchain {
     // BLOCKCHAIN HEIGHT
     // ==========================
 
-    pub fn height(
-        &self,
-    ) -> usize {
+    pub fn height(&self) -> usize {
         self.chain.len()
     }
 
     // ==========================
-    // BLOCKCHAIN DOĞRULAMA
+    // BLOCKCHAIN VALIDATION
     // ==========================
 
-    pub fn is_valid(
-        &self,
-    ) -> bool {
-        let mut seen_transaction_ids:
-            HashSet<&str> =
-            HashSet::new();
+    pub fn is_valid(&self) -> bool {
+        let mut seen_transaction_ids: HashSet<&str> = HashSet::new();
 
-        for (
-            position,
-            block,
-        ) in self
-            .chain
-            .iter()
-            .enumerate()
-        {
-            if Self::validate_block_field_sizes(
-                block,
-            )
-            .is_err()
-            {
+        for (position, block) in self.chain.iter().enumerate() {
+            if Self::validate_block_field_sizes(block).is_err() {
                 return false;
             }
 
@@ -805,9 +450,7 @@ impl Blockchain {
             // INDEX
             // ==========================
 
-            if block.index
-                != position as u64
-            {
+            if block.index != position as u64 {
                 return false;
             }
 
@@ -815,26 +458,16 @@ impl Blockchain {
             // TRANSACTION ID
             // ==========================
 
-            for transaction
-                in &block.transactions
-            {
-                if !seen_transaction_ids.insert(
-                    transaction.id.as_str(),
-                ) {
+            for transaction in &block.transactions {
+                if !seen_transaction_ids.insert(transaction.id.as_str()) {
                     return false;
                 }
 
-                if transaction.id
-                    != transaction
-                        .calculate_id()
-                {
+                if transaction.id != transaction.calculate_id() {
                     return false;
                 }
 
-                if transaction.coinbase
-                    && transaction.reward_marker
-                        != block.index as u128
-                {
+                if transaction.coinbase && transaction.reward_marker != block.index as u128 {
                     return false;
                 }
             }
@@ -843,9 +476,7 @@ impl Blockchain {
             // HASH
             // ==========================
 
-            if block.hash
-                != block.calculate_hash()
-            {
+            if block.hash != block.calculate_hash() {
                 return false;
             }
 
@@ -854,42 +485,33 @@ impl Blockchain {
             // ==========================
 
             if position == 0 {
-                if block.previous_hash
-                    != "0"
-                {
+                if block.previous_hash != "0" {
                     return false;
                 }
 
                 continue;
             }
 
-            let previous =
-                &self.chain[
-                    position - 1
-                ];
+            let previous = &self.chain[position - 1];
 
             // ==========================
             // TIMESTAMP
             // ==========================
 
-            if block.timestamp
-                <= previous.timestamp
-            {
+            if block.timestamp <= previous.timestamp {
                 return false;
             }
 
             // ==========================
-            // ZİNCİR BAĞLANTISI
+            // CHAIN LINKAGE
             // ==========================
 
-            if block.previous_hash
-                != previous.hash
-            {
+            if block.previous_hash != previous.hash {
                 return false;
             }
 
             // ==========================
-            // BLOCK İMZASI
+            // BLOCK SIGNATURE
             // ==========================
 
             if !block.is_signed() {
@@ -897,28 +519,19 @@ impl Blockchain {
             }
 
             // ==========================
-            // VALIDATOR ADRESİ
+            // VALIDATOR ADDRESS
             // ==========================
 
             let derived_validator_address =
-                match Wallet::
-                    address_from_public_key(
-                        &block
-                            .validator_public_key,
-                    )
-                {
-                    Some(address) => {
-                        address
-                    }
+                match Wallet::address_from_public_key(&block.validator_public_key) {
+                    Some(address) => address,
 
                     None => {
                         return false;
                     }
                 };
 
-            if derived_validator_address
-                != block.validator
-            {
+            if derived_validator_address != block.validator {
                 return false;
             }
 
@@ -926,18 +539,13 @@ impl Blockchain {
             // VALIDATOR SIGNATURE
             // ==========================
 
-            let validator_signature =
-                match &block
-                    .validator_signature
-                {
-                    Some(signature) => {
-                        signature
-                    }
+            let validator_signature = match &block.validator_signature {
+                Some(signature) => signature,
 
-                    None => {
-                        return false;
-                    }
-                };
+                None => {
+                    return false;
+                }
+            };
 
             if !Wallet::verify(
                 &block.validator_public_key,

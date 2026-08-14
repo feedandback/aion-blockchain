@@ -1,20 +1,9 @@
-use serde::{
-    Deserialize,
-    Serialize,
-};
-use sha2::{
-    Digest,
-    Sha256,
-};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::Transaction;
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Block {
     pub index: u64,
     pub timestamp: u64,
@@ -46,103 +35,54 @@ impl Block {
             transactions,
         };
 
-        block.hash =
-            block.calculate_hash();
+        block.hash = block.calculate_hash();
 
         block
     }
 
-    fn append_bytes(
-        buffer: &mut Vec<u8>,
-        value: &[u8],
-    ) {
-        let length =
-            value.len() as u64;
+    fn append_bytes(buffer: &mut Vec<u8>, value: &[u8]) {
+        let length = value.len() as u64;
 
-        buffer.extend_from_slice(
-            &length.to_be_bytes(),
-        );
+        buffer.extend_from_slice(&length.to_be_bytes());
 
-        buffer.extend_from_slice(
-            value,
-        );
+        buffer.extend_from_slice(value);
     }
 
-    fn append_string(
-        buffer: &mut Vec<u8>,
-        value: &str,
-    ) {
-        Self::append_bytes(
-            buffer,
-            value.as_bytes(),
-        );
+    fn append_string(buffer: &mut Vec<u8>, value: &str) {
+        Self::append_bytes(buffer, value.as_bytes());
     }
 
-    pub fn calculate_hash(
-        &self,
-    ) -> String {
-        let mut data =
-            Vec::new();
+    pub fn calculate_hash(&self) -> String {
+        let mut data = Vec::new();
 
-        data.extend_from_slice(
-            b"AION_BLOCK_V1",
-        );
+        data.extend_from_slice(b"AION_BLOCK_V1");
 
-        data.extend_from_slice(
-            &self.index.to_be_bytes(),
-        );
+        data.extend_from_slice(&self.index.to_be_bytes());
 
-        data.extend_from_slice(
-            &self.timestamp.to_be_bytes(),
-        );
+        data.extend_from_slice(&self.timestamp.to_be_bytes());
 
-        Self::append_string(
-            &mut data,
-            &self.previous_hash,
-        );
+        Self::append_string(&mut data, &self.previous_hash);
 
-        Self::append_string(
-            &mut data,
-            &self.validator,
-        );
+        Self::append_string(&mut data, &self.validator);
 
-        Self::append_string(
-            &mut data,
-            &self.validator_public_key,
-        );
+        Self::append_string(&mut data, &self.validator_public_key);
 
-        let transaction_count =
-            self.transactions.len() as u64;
+        let transaction_count = self.transactions.len() as u64;
 
-        data.extend_from_slice(
-            &transaction_count
-                .to_be_bytes(),
-        );
+        data.extend_from_slice(&transaction_count.to_be_bytes());
 
-        for transaction
-            in &self.transactions
-        {
-            Self::append_string(
-                &mut data,
-                &transaction.id,
-            );
+        for transaction in &self.transactions {
+            Self::append_string(&mut data, &transaction.id);
 
-            let transaction_message =
-                transaction.message();
+            let transaction_message = transaction.message();
 
-            Self::append_bytes(
-                &mut data,
-                &transaction_message,
-            );
+            Self::append_bytes(&mut data, &transaction_message);
 
             match &transaction.signature {
                 Some(signature) => {
                     data.push(1);
 
-                    Self::append_string(
-                        &mut data,
-                        signature,
-                    );
+                    Self::append_string(&mut data, signature);
                 }
 
                 None => {
@@ -151,38 +91,22 @@ impl Block {
             }
         }
 
-        let mut hasher =
-            Sha256::new();
+        let mut hasher = Sha256::new();
 
-        hasher.update(
-            &data,
-        );
+        hasher.update(&data);
 
-        format!(
-            "{:x}",
-            hasher.finalize()
-        )
+        format!("{:x}", hasher.finalize())
     }
 
-    pub fn sign(
-        &mut self,
-        signature: String,
-    ) {
-        self.validator_signature =
-            Some(signature);
+    pub fn sign(&mut self, signature: String) {
+        self.validator_signature = Some(signature);
     }
 
-    pub fn is_signed(
-        &self,
-    ) -> bool {
-        self.validator_signature
-            .is_some()
+    pub fn is_signed(&self) -> bool {
+        self.validator_signature.is_some()
     }
 
-    pub fn is_hash_valid(
-        &self,
-    ) -> bool {
-        self.hash
-            == self.calculate_hash()
+    pub fn is_hash_valid(&self) -> bool {
+        self.hash == self.calculate_hash()
     }
 }

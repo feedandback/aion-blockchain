@@ -16,6 +16,12 @@ pub struct State {
     pub burned_amount: u64,
 }
 
+impl Default for State {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[allow(dead_code)]
 impl State {
     pub fn new() -> Self {
@@ -45,15 +51,12 @@ impl State {
     }
 
     pub fn add_balance(&mut self, address: &str, amount: u64) -> Result<(), String> {
-        let account = self
-            .accounts
-            .get_mut(address)
-            .ok_or("Hesap bulunamadı")?;
+        let account = self.accounts.get_mut(address).ok_or("Account not found")?;
 
         account.balance = account
             .balance
             .checked_add(amount)
-            .ok_or("Bakiye overflow")?;
+            .ok_or("Balance overflow")?;
 
         Ok(())
     }
@@ -88,12 +91,9 @@ impl State {
     // TRANSACTION APPLY
     // ==========================
 
-    pub fn apply_transaction(
-        &mut self,
-        transaction: &Transaction,
-    ) -> Result<(), String> {
+    pub fn apply_transaction(&mut self, transaction: &Transaction) -> Result<(), String> {
         // COINBASE
-        // Sistem üretimi
+        // System-generated transaction
 
         if transaction.coinbase {
             let receiver = self
@@ -115,7 +115,7 @@ impl State {
         let sender = self
             .accounts
             .get(&transaction.from)
-            .ok_or("Gönderen hesap bulunamadı")?
+            .ok_or("Sender account not found")?
             .clone();
 
         let total_cost = transaction
@@ -124,17 +124,17 @@ impl State {
             .ok_or("Transaction overflow")?;
 
         if sender.balance < total_cost {
-            return Err("Yetersiz bakiye".into());
+            return Err("Insufficient balance".into());
         }
 
         if sender.nonce != transaction.nonce {
-            return Err("Nonce hatalı".into());
+            return Err("Invalid nonce".into());
         }
 
         let sender_account = self
             .accounts
             .get_mut(&transaction.from)
-            .ok_or("Gönderen hesap bulunamadı")?;
+            .ok_or("Sender account not found")?;
 
         sender_account.balance -= total_cost;
         sender_account.nonce += 1;
@@ -150,7 +150,7 @@ impl State {
         receiver_account.balance = receiver_account
             .balance
             .checked_add(transaction.amount)
-            .ok_or("Alıcı overflow")?;
+            .ok_or("Receiver balance overflow")?;
 
         Ok(())
     }
@@ -161,8 +161,8 @@ impl State {
     ) -> Result<(), String> {
         let mut temp = self.clone();
 
-        for tx in transactions {
-            temp.apply_transaction(tx)?;
+        for transaction in transactions {
+            temp.apply_transaction(transaction)?;
         }
 
         *self = temp;

@@ -109,7 +109,9 @@ impl ValidatorCandidateKeystore {
 
     pub fn generate(&self, password: &str) -> Result<String, String> {
         if self.exists()? {
-            return Err("Validator candidate zaten mevcut; otomatik overwrite reddedildi".into());
+            return Err(
+                "Validator candidate already exists; automatic overwrite was rejected".into(),
+            );
         }
 
         let wallet = Wallet::new();
@@ -120,13 +122,10 @@ impl ValidatorCandidateKeystore {
             validator_address: validator_address.clone(),
             private_key_hex: wallet.private_key_hex(),
         };
-        let plaintext = serde_json::to_vec(&stored_candidate)
-            .map_err(|error| format!("Validator candidate payload oluşturulamadı: {error}"))?;
-        let serialized = ValidatorKeystore::encrypt(
-            password,
-            &plaintext,
-            VALIDATOR_CANDIDATE_AAD,
-        )?;
+        let plaintext = serde_json::to_vec(&stored_candidate).map_err(|error| {
+            format!("Validator candidate payload could not be created: {error}")
+        })?;
+        let serialized = ValidatorKeystore::encrypt(password, &plaintext, VALIDATOR_CANDIDATE_AAD)?;
 
         ValidatorKeystore::store_without_overwrite(
             &self.data_directory,
@@ -146,23 +145,19 @@ impl ValidatorCandidateKeystore {
             Some(encrypted) => encrypted,
             None => return Ok(None),
         };
-        let plaintext = ValidatorKeystore::decrypt(
-            password,
-            &encrypted,
-            VALIDATOR_CANDIDATE_AAD,
-        )?;
+        let plaintext = ValidatorKeystore::decrypt(password, &encrypted, VALIDATOR_CANDIDATE_AAD)?;
         let stored_candidate: StoredValidatorCandidate = serde_json::from_slice(&plaintext)
-            .map_err(|_| "Validator candidate payload geçersiz".to_string())?;
+            .map_err(|_| "Validator candidate payload is invalid".to_string())?;
 
         if stored_candidate.format != VALIDATOR_CANDIDATE_FORMAT
             || stored_candidate.network_family != VALIDATOR_CANDIDATE_NETWORK_FAMILY
         {
-            return Err("Validator candidate network ailesi veya formatıyla uyuşmuyor".into());
+            return Err("Validator candidate does not match the network family or format".into());
         }
 
         let wallet = Wallet::from_private_key_hex(&stored_candidate.private_key_hex)?;
         if wallet.address() != stored_candidate.validator_address {
-            return Err("Validator candidate adresi private key ile uyuşmuyor".into());
+            return Err("Validator candidate address does not match the private key".into());
         }
 
         Ok(Some(ValidatorCandidate { wallet }))
@@ -176,20 +171,17 @@ impl ValidatorCandidateKeystore {
     ) -> Result<ValidatorActivation, String> {
         let active_keystore = ValidatorKeystore::at(&self.data_directory);
         if active_keystore.exists()? {
-            return Err("Validator keystore zaten mevcut; otomatik overwrite reddedildi".into());
+            return Err(
+                "Validator keystore already exists; automatic overwrite was rejected".into(),
+            );
         }
 
         let candidate = self
             .load(password)?
-            .ok_or("Validator candidate keystore bulunamadı")?;
+            .ok_or("Validator candidate keystore was not found")?;
         let validator_address = candidate.address().to_string();
         let private_key_hex = candidate.wallet.private_key_hex();
-        active_keystore.provision(
-            password,
-            &private_key_hex,
-            consensus,
-            genesis_fingerprint,
-        )?;
+        active_keystore.provision(password, &private_key_hex, consensus, genesis_fingerprint)?;
 
         let candidate_removed = fs::remove_file(self.path()).is_ok();
 
@@ -205,7 +197,7 @@ impl ValidatorIdentity {
         let wallet = Wallet::from_private_key_hex(private_key_hex)?;
 
         if !consensus.is_validator_allowed(wallet.address()) {
-            return Err("Private key canonical validator setinde yer almıyor".into());
+            return Err("Private key is not in the canonical validator set".into());
         }
 
         Ok(Self { wallet })
@@ -247,7 +239,7 @@ impl ValidatorKeystore {
         match fs::metadata(path) {
             Ok(_) => Ok(true),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(format!("{label} erişim durumu belirlenemedi: {error}")),
+            Err(error) => Err(format!("Could not determine {label} access state: {error}")),
         }
     }
 
@@ -263,7 +255,9 @@ impl ValidatorKeystore {
         let final_path = self.path();
 
         if self.exists()? {
-            return Err("Validator keystore zaten mevcut; otomatik overwrite reddedildi".into());
+            return Err(
+                "Validator keystore already exists; automatic overwrite was rejected".into(),
+            );
         }
 
         let stored_key = StoredValidatorKey {
@@ -274,7 +268,7 @@ impl ValidatorKeystore {
             private_key_hex: private_key_hex.to_string(),
         };
         let plaintext = serde_json::to_vec(&stored_key)
-            .map_err(|error| format!("Validator key payload oluşturulamadı: {error}"))?;
+            .map_err(|error| format!("Validator key payload could not be created: {error}"))?;
         let serialized = Self::encrypt(password, &plaintext, VALIDATOR_KEYSTORE_AAD)?;
         Self::store_without_overwrite(
             &self.data_directory,
@@ -299,19 +293,19 @@ impl ValidatorKeystore {
 
         let plaintext = Self::decrypt(password, &encrypted, VALIDATOR_KEYSTORE_AAD)?;
         let stored_key: StoredValidatorKey = serde_json::from_slice(&plaintext)
-            .map_err(|_| "Validator keystore payload geçersiz".to_string())?;
+            .map_err(|_| "Validator keystore payload is invalid".to_string())?;
 
         if stored_key.format != VALIDATOR_KEYSTORE_FORMAT
             || stored_key.network_id != NETWORK_ID
             || stored_key.genesis_fingerprint != expected_genesis_fingerprint
         {
-            return Err("Validator keystore ağ veya genesis kimliğiyle uyuşmuyor".into());
+            return Err("Validator keystore does not match the network or genesis identity".into());
         }
 
         let identity = ValidatorIdentity::from_private_key(&stored_key.private_key_hex, consensus)?;
 
         if identity.address() != stored_key.validator_address {
-            return Err("Validator keystore adresi private key ile uyuşmuyor".into());
+            return Err("Validator keystore address does not match the private key".into());
         }
 
         Ok(Some(identity))
@@ -319,7 +313,7 @@ impl ValidatorKeystore {
 
     fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], String> {
         if password.len() < 12 {
-            return Err("Validator keystore şifresi en az 12 karakter olmalı".into());
+            return Err("Validator keystore password must be at least 12 characters".into());
         }
 
         let mut key = [0u8; 32];
@@ -329,10 +323,10 @@ impl ValidatorKeystore {
             ARGON2_PARALLELISM,
             Some(key.len()),
         )
-        .map_err(|error| format!("Validator keystore KDF parametreleri geçersiz: {error}"))?;
+        .map_err(|error| format!("Validator keystore KDF parameters are invalid: {error}"))?;
         Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
             .hash_password_into(password.as_bytes(), salt, &mut key)
-            .map_err(|error| format!("Validator keystore anahtarı türetilemedi: {error}"))?;
+            .map_err(|error| format!("Validator keystore key could not be derived: {error}"))?;
         Ok(key)
     }
 
@@ -342,7 +336,7 @@ impl ValidatorKeystore {
         salt.copy_from_slice(&random_salt_material.as_slice()[..16]);
         let key = Self::derive_key(password, &salt)?;
         let cipher = ChaCha20Poly1305::new_from_slice(&key)
-            .map_err(|_| "Validator keystore encryption key geçersiz".to_string())?;
+            .map_err(|_| "Validator keystore encryption key is invalid".to_string())?;
         let nonce = Nonce::generate();
         let ciphertext = cipher
             .encrypt(
@@ -352,7 +346,7 @@ impl ValidatorKeystore {
                     aad,
                 },
             )
-            .map_err(|_| "Validator private key şifrelenemedi".to_string())?;
+            .map_err(|_| "Validator private key could not be encrypted".to_string())?;
         let envelope = EncryptedValidatorKeystore {
             version: 1,
             kdf: "argon2id".to_string(),
@@ -366,12 +360,12 @@ impl ValidatorKeystore {
         };
 
         serde_json::to_vec_pretty(&envelope)
-            .map_err(|error| format!("Validator keystore JSON oluşturulamadı: {error}"))
+            .map_err(|error| format!("Validator keystore JSON could not be created: {error}"))
     }
 
     fn decrypt(password: &str, encrypted: &[u8], aad: &[u8]) -> Result<Vec<u8>, String> {
         let envelope: EncryptedValidatorKeystore = serde_json::from_slice(encrypted)
-            .map_err(|_| "Validator keystore formatı geçersiz".to_string())?;
+            .map_err(|_| "Validator keystore format is invalid".to_string())?;
 
         if envelope.version != 1
             || envelope.kdf != "argon2id"
@@ -380,25 +374,25 @@ impl ValidatorKeystore {
             || envelope.kdf_parallelism != ARGON2_PARALLELISM
             || envelope.cipher != "chacha20poly1305"
         {
-            return Err("Validator keystore encryption formatı desteklenmiyor".into());
+            return Err("Validator keystore encryption format is not supported".into());
         }
 
         let salt = hex::decode(&envelope.salt_hex)
-            .map_err(|_| "Validator keystore salt formatı geçersiz".to_string())?;
+            .map_err(|_| "Validator keystore salt format is invalid".to_string())?;
         if salt.len() != 16 {
-            return Err("Validator keystore salt uzunluğu geçersiz".into());
+            return Err("Validator keystore salt length is invalid".into());
         }
 
         let nonce_bytes = hex::decode(&envelope.nonce_hex)
-            .map_err(|_| "Validator keystore nonce formatı geçersiz".to_string())?;
+            .map_err(|_| "Validator keystore nonce format is invalid".to_string())?;
         let nonce_array: [u8; 12] = nonce_bytes
             .try_into()
-            .map_err(|_| "Validator keystore nonce uzunluğu geçersiz".to_string())?;
+            .map_err(|_| "Validator keystore nonce length is invalid".to_string())?;
         let ciphertext = hex::decode(&envelope.ciphertext_hex)
-            .map_err(|_| "Validator keystore ciphertext formatı geçersiz".to_string())?;
+            .map_err(|_| "Validator keystore ciphertext format is invalid".to_string())?;
         let key = Self::derive_key(password, &salt)?;
         let cipher = ChaCha20Poly1305::new_from_slice(&key)
-            .map_err(|_| "Validator keystore decryption key geçersiz".to_string())?;
+            .map_err(|_| "Validator keystore decryption key is invalid".to_string())?;
         let nonce = Nonce::from(nonce_array);
 
         cipher
@@ -409,29 +403,31 @@ impl ValidatorKeystore {
                     aad,
                 },
             )
-            .map_err(|_| "Validator keystore şifresi yanlış veya dosya bozulmuş".to_string())
+            .map_err(|_| {
+                "Validator keystore password is incorrect or the file is corrupted".to_string()
+            })
     }
 
     fn read_encrypted_file(path: &Path, label: &str) -> Result<Option<Vec<u8>>, String> {
         let file = match File::open(path) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("{label} açılamadı: {error}")),
+            Err(error) => return Err(format!("{label} could not be opened: {error}")),
         };
         let metadata = file
             .metadata()
-            .map_err(|error| format!("{label} metadata okunamadı: {error}"))?;
+            .map_err(|error| format!("{label} metadata could not be read: {error}"))?;
 
         if metadata.len() == 0 || metadata.len() > MAX_VALIDATOR_KEYSTORE_BYTES {
-            return Err(format!("{label} boyutu geçersiz"));
+            return Err(format!("{label} size is invalid"));
         }
 
         let mut encrypted = Vec::new();
         file.take(MAX_VALIDATOR_KEYSTORE_BYTES + 1)
             .read_to_end(&mut encrypted)
-            .map_err(|error| format!("{label} okunamadı: {error}"))?;
+            .map_err(|error| format!("{label} could not be read: {error}"))?;
         if encrypted.len() as u64 > MAX_VALIDATOR_KEYSTORE_BYTES {
-            return Err(format!("{label} boyutu geçersiz"));
+            return Err(format!("{label} size is invalid"));
         }
 
         Ok(Some(encrypted))
@@ -445,7 +441,7 @@ impl ValidatorKeystore {
     ) -> Result<(), String> {
         fs::create_dir_all(data_directory).map_err(|error| {
             format!(
-                "Validator keystore data klasörü oluşturulamadı ({}): {error}",
+                "Validator keystore data directory could not be created ({}): {error}",
                 data_directory.display()
             )
         })?;
@@ -465,7 +461,7 @@ impl ValidatorKeystore {
         if let Err(error) = fs::hard_link(&temp_path, final_path) {
             let _ = fs::remove_file(&temp_path);
             return Err(format!(
-                "Validator keystore aktif konuma taşınamadı veya zaten mevcut: {error}"
+                "Validator keystore could not be moved to the active location or already exists: {error}"
             ));
         }
 
@@ -483,12 +479,13 @@ impl ValidatorKeystore {
             options.mode(0o600);
         }
 
-        let mut file = options
-            .open(path)
-            .map_err(|error| format!("Validator keystore temp dosyası oluşturulamadı: {error}"))?;
+        let mut file = options.open(path).map_err(|error| {
+            format!("Validator keystore temp file could not be created: {error}")
+        })?;
         file.write_all(contents)
-            .map_err(|error| format!("Validator keystore yazılamadı: {error}"))?;
-        file.sync_all()
-            .map_err(|error| format!("Validator keystore diske senkronize edilemedi: {error}"))
+            .map_err(|error| format!("Validator keystore could not be written: {error}"))?;
+        file.sync_all().map_err(|error| {
+            format!("Validator keystore could not be synchronized to disk: {error}")
+        })
     }
 }

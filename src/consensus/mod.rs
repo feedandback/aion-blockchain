@@ -33,35 +33,27 @@ impl Consensus {
         true
     }
 
-    pub fn increase_stake(
-        &mut self,
-        address: &str,
-        amount: u64,
-    ) -> Result<(), String> {
+    pub fn increase_stake(&mut self, address: &str, amount: u64) -> Result<(), String> {
         let validator = self
             .validators
             .iter_mut()
             .find(|v| v.address == address)
-            .ok_or("Validator bulunamadı")?;
+            .ok_or("Validator was not found")?;
 
         validator.stake += amount;
 
         Ok(())
     }
 
-    pub fn decrease_stake(
-        &mut self,
-        address: &str,
-        amount: u64,
-    ) -> Result<(), String> {
+    pub fn decrease_stake(&mut self, address: &str, amount: u64) -> Result<(), String> {
         let validator = self
             .validators
             .iter_mut()
             .find(|v| v.address == address)
-            .ok_or("Validator bulunamadı")?;
+            .ok_or("Validator was not found")?;
 
         if validator.stake < amount {
-            return Err("Yetersiz stake".into());
+            return Err("Insufficient stake".into());
         }
 
         validator.stake -= amount;
@@ -103,10 +95,7 @@ impl Consensus {
         None
     }
 
-    pub fn select_validator_from_hash(
-        &self,
-        previous_hash: &str,
-    ) -> Option<&Validator> {
+    pub fn select_validator_from_hash(&self, previous_hash: &str) -> Option<&Validator> {
         let mut hasher = Sha256::new();
 
         hasher.update(previous_hash.as_bytes());
@@ -123,8 +112,6 @@ impl Consensus {
     }
 
     pub fn is_validator_allowed(&self, address: &str) -> bool {
-        self.validators
-            .iter()
-            .any(|v| v.address == address)
+        self.validators.iter().any(|v| v.address == address)
     }
 }

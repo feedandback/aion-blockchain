@@ -100,10 +100,10 @@ impl NodeRuntime {
         node: Node,
         validator_identity: Option<ValidatorIdentity>,
     ) -> Result<Self, String> {
-        if let Some(identity) = validator_identity.as_ref() {
-            if !node.consensus.is_validator_allowed(identity.address()) {
-                return Err("Runtime validator kimliği node consensus setinde yok".into());
-            }
+        if let Some(identity) = validator_identity.as_ref()
+            && !node.consensus.is_validator_allowed(identity.address())
+        {
+            return Err("Runtime validator identity is not in the node consensus set".into());
         }
 
         let data_directory = node.storage_directory().to_path_buf();
@@ -145,13 +145,13 @@ impl NodeRuntime {
 
     pub fn try_produce_block(&mut self, timestamp: u64) -> Result<Block, String> {
         if self.chain_sync_active {
-            return Err("Aktif chain sync sırasında block üretilemez".into());
+            return Err("Block production is disabled during active chain synchronization".into());
         }
 
         let identity = self
             .validator_identity
             .as_ref()
-            .ok_or("Observer node block üretemez; validator key yüklenmemiş")?;
+            .ok_or("Observer node cannot produce blocks because no validator key is loaded")?;
         self.node.produce_block(timestamp, identity.wallet())
     }
 
@@ -160,13 +160,8 @@ impl NodeRuntime {
             listen_address,
             peers,
         } = config;
-        if listen_address
-            == ONE_SHOT_CLIENT_LISTEN_ADDRESS
-        {
-            return Err(
-                "Production node listener one-shot client address kullanamaz"
-                    .into(),
-            );
+        if listen_address == ONE_SHOT_CLIENT_LISTEN_ADDRESS {
+            return Err("Production node listener cannot use the one-shot client address".into());
         }
         let listener = TcpTransport::bind(&listen_address).await?;
         let p2p_identity = Arc::new(Wallet::new());
@@ -183,20 +178,20 @@ impl NodeRuntime {
             }
             locked.chain_sync_active = !sync_peers.is_empty();
 
-            println!("Kybernetes node runtime başlatıldı: {listen_address}");
+            println!("Kybernetes node runtime started: {listen_address}");
             println!("Data directory: {}", locked.data_directory.display());
             match locked.role() {
                 NodeRole::Observer => {
-                    println!("Node rolü: observer/full node");
+                    println!("Node role: observer/full node");
                     if locked.validator_keystore_locked {
                         println!(
-                            "Validator keystore mevcut fakat {} tanımlı değil; observer modu aktif.",
+                            "Validator keystore exists but {} is not configured; observer mode is active.",
                             VALIDATOR_PASSWORD_ENV
                         );
                     }
                 }
                 NodeRole::Validator => println!(
-                    "Node rolü: validator ({})",
+                    "Node role: validator ({})",
                     locked.validator_address().unwrap_or("unknown")
                 ),
             }
@@ -225,7 +220,7 @@ impl NodeRuntime {
                         {
                             Ok(()) => synchronized = true,
                             Err(error) => {
-                                println!("Peer sync başarısız ({peer}): {error}");
+                                println!("Peer synchronization failed ({peer}): {error}");
                             }
                         }
                     }
@@ -251,8 +246,8 @@ impl NodeRuntime {
         loop {
             tokio::select! {
                 shutdown = tokio::signal::ctrl_c() => {
-                    shutdown.map_err(|error| format!("Shutdown sinyali dinlenemedi: {error}"))?;
-                    println!("Kybernetes node runtime kapatılıyor.");
+                    shutdown.map_err(|error| format!("Shutdown signal could not be monitored: {error}"))?;
+                    println!("Kybernetes node runtime is shutting down.");
                     return Ok(());
                 }
                 _ = production_tick.tick() => {
@@ -272,7 +267,7 @@ impl NodeRuntime {
                             .await;
                         }
                         Ok(None) => {}
-                        Err(error) => println!("Validator block üretim denemesi başarısız: {error}"),
+                        Err(error) => println!("Validator block production attempt failed: {error}"),
                     }
                 }
                 accepted = TcpTransport::accept_connection(&listener) => {
@@ -281,7 +276,7 @@ impl NodeRuntime {
                             let permit = match connection_limit.clone().try_acquire_owned() {
                                 Ok(permit) => permit,
                                 Err(_) => {
-                                    println!("P2P bağlantısı reddedildi: eşzamanlı bağlantı limiti dolu");
+                                    println!("P2P connection rejected: concurrent connection limit reached");
                                     drop(stream);
                                     continue;
                                 }
@@ -308,17 +303,17 @@ impl NodeRuntime {
                                         )
                                         .await
                                         {
-                                            println!("P2P session kapandı ({peer_address}): {error}");
+                                            println!("P2P session closed ({peer_address}): {error}");
                                         }
                                     }
                                     Err(error) => {
-                                        println!("P2P bağlantısı reddedildi ({peer_address}): {error}");
+                                        println!("P2P connection rejected ({peer_address}): {error}");
                                     }
                                 }
                             });
                         }
                         Err(error) => {
-                            println!("P2P bağlantısı reddedildi: {error}");
+                            println!("P2P connection rejected: {error}");
                         }
                     }
                 }
@@ -347,24 +342,16 @@ impl NodeRuntime {
         }
 
         loop {
-            let Some(message) =
-                TcpTransport::read_message_or_eof(
-                    &mut stream,
-                )
-                .await?
-            else {
+            let Some(message) = TcpTransport::read_message_or_eof(&mut stream).await? else {
                 return Ok(());
             };
 
             if matches!(&message, NetworkMessage::ChainChunkResponse { .. }) {
-                return Err("Beklenmeyen chain chunk response reddedildi".into());
+                return Err("Unexpected chain chunk response rejected".into());
             }
             let outcome = {
                 let mut locked = runtime.lock().await;
-                locked.process_message(
-                    message,
-                    one_shot_client,
-                )?
+                locked.process_message(message, one_shot_client)?
             };
             Self::execute_actions(
                 &runtime,
@@ -389,13 +376,13 @@ impl NodeRuntime {
         let (local_height, local_genesis_hash, local_tip_hash) = {
             let locked = runtime.lock().await;
             let local_height = u64::try_from(locked.node.blockchain.chain.len())
-                .map_err(|_| "Yerel blockchain uzunluğu u64 aralığını aşıyor")?;
+                .map_err(|_| "Local blockchain length exceeds the u64 range")?;
             let local_genesis_hash = locked
                 .node
                 .blockchain
                 .chain
                 .first()
-                .ok_or("Yerel blockchain boş")?
+                .ok_or("Local blockchain is empty")?
                 .hash
                 .clone();
             let local_tip_hash = locked
@@ -403,7 +390,7 @@ impl NodeRuntime {
                 .blockchain
                 .chain
                 .last()
-                .ok_or("Yerel blockchain boş")?
+                .ok_or("Local blockchain is empty")?
                 .hash
                 .clone();
             (local_height, local_genesis_hash, local_tip_hash)
@@ -412,12 +399,12 @@ impl NodeRuntime {
         let remote_genesis = status
             .blocks
             .first()
-            .ok_or("Remote status chunk genesis içermiyor")?;
+            .ok_or("Remote status chunk does not contain genesis")?;
         if remote_genesis.index != 0
             || remote_genesis.hash != remote_genesis.calculate_hash()
             || remote_genesis.hash != local_genesis_hash
         {
-            return Err("Remote genesis canonical genesis ile uyuşmuyor".into());
+            return Err("Remote genesis does not match the canonical genesis".into());
         }
 
         if status.total_blocks < local_height {
@@ -427,36 +414,42 @@ impl NodeRuntime {
         if status.total_blocks == local_height {
             let mut remote_chain = status.blocks;
             let mut next_index = u64::try_from(remote_chain.len())
-                .map_err(|_| "Remote chain uzunluğu u64 aralığını aşıyor")?;
+                .map_err(|_| "Remote chain length exceeds the u64 range")?;
             while next_index < status.total_blocks {
                 let chunk = Self::request_chunk(&mut stream, next_index).await?;
                 if chunk.total_blocks != status.total_blocks {
-                    return Err("Chain sync sırasında remote toplam block sayısı değişti".into());
+                    return Err(
+                        "Remote total block count changed during chain synchronization".into(),
+                    );
                 }
                 remote_chain.extend(chunk.blocks);
                 next_index = u64::try_from(remote_chain.len())
-                    .map_err(|_| "Remote chain uzunluğu u64 aralığını aşıyor")?;
+                    .map_err(|_| "Remote chain length exceeds the u64 range")?;
             }
             let remote_tip_hash = remote_chain
                 .last()
-                .ok_or("Remote blockchain boş")?
+                .ok_or("Remote blockchain is empty")?
                 .hash
                 .clone();
             if remote_tip_hash != local_tip_hash {
-                return Err("Eşit uzunlukta farklı remote fork reddedildi".into());
+                return Err("Different remote fork with equal length was rejected".into());
             }
             let mut locked = runtime.lock().await;
             locked.node.verify_equal_chain(remote_chain)?;
             return Ok(());
         }
 
-        let anchor_index = local_height.checked_sub(1).ok_or("Yerel blockchain boş")?;
+        let anchor_index = local_height
+            .checked_sub(1)
+            .ok_or("Local blockchain is empty")?;
         let anchor_chunk = if anchor_index < status.blocks.len() as u64 {
             None
         } else {
             let chunk = Self::request_chunk(&mut stream, anchor_index).await?;
             if chunk.total_blocks < status.total_blocks {
-                return Err("Chain sync sırasında remote toplam block sayısı küçüldü".into());
+                return Err(
+                    "Remote total block count decreased during chain synchronization".into(),
+                );
             }
             Some(chunk)
         };
@@ -467,12 +460,12 @@ impl NodeRuntime {
         let anchor_offset = usize::try_from(
             anchor_index
                 .checked_sub(anchor_chunk.as_ref().map_or(0, |chunk| chunk.start_index))
-                .ok_or("Remote anchor index geriye taştı")?,
+                .ok_or("Remote anchor index moved backwards")?,
         )
-        .map_err(|_| "Remote anchor offset geçersiz")?;
+        .map_err(|_| "Remote anchor offset is invalid")?;
         let remote_anchor = anchor_blocks
             .get(anchor_offset)
-            .ok_or("Remote chain yerel tip anchor block'unu içermiyor")?;
+            .ok_or("Remote chain does not contain the local tip anchor block")?;
 
         if remote_anchor.hash == local_tip_hash {
             let anchor_suffix = anchor_blocks
@@ -515,7 +508,11 @@ impl NodeRuntime {
                 total_blocks,
                 blocks,
             },
-            _ => return Err("Chain sync oturumunda beklenmeyen mesaj reddedildi".into()),
+            _ => {
+                return Err(
+                    "Unexpected message rejected during chain synchronization session".into(),
+                );
+            }
         };
         Self::validate_chunk(&chunk, requested_start)?;
         Ok(chunk)
@@ -523,22 +520,24 @@ impl NodeRuntime {
 
     fn validate_chunk(chunk: &ChainChunk, expected_start: u64) -> Result<(), String> {
         if chunk.start_index != expected_start {
-            return Err("Remote chain chunk start_index değeri beklenenle uyuşmuyor".into());
+            return Err("Remote chain chunk start_index does not match the expected value".into());
         }
         if chunk.total_blocks == 0 || chunk.start_index > chunk.total_blocks {
-            return Err("Remote chain chunk toplam block sayısı geçersiz".into());
+            return Err("Remote chain chunk total block count is invalid".into());
         }
         if chunk.blocks.len() > MAX_SYNC_BLOCKS_PER_MESSAGE {
-            return Err("Remote chain chunk 256 block limitini aşıyor".into());
+            return Err("Remote chain chunk exceeds the 256 block limit".into());
         }
         let block_count = u64::try_from(chunk.blocks.len())
-            .map_err(|_| "Remote chain chunk uzunluğu geçersiz")?;
+            .map_err(|_| "Remote chain chunk length is invalid")?;
         let end = chunk
             .start_index
             .checked_add(block_count)
             .ok_or("Remote chain chunk index overflow")?;
         if end > chunk.total_blocks || (chunk.blocks.is_empty() && end < chunk.total_blocks) {
-            return Err("Remote chain chunk uzunluğu toplam block sayısıyla uyumsuz".into());
+            return Err(
+                "Remote chain chunk length is inconsistent with the total block count".into(),
+            );
         }
         for (offset, block) in chunk.blocks.iter().enumerate() {
             let expected_index = chunk
@@ -546,7 +545,7 @@ impl NodeRuntime {
                 .checked_add(offset as u64)
                 .ok_or("Remote block index overflow")?;
             if block.index != expected_index {
-                return Err("Remote chain chunk block sırası geçersiz".into());
+                return Err("Remote chain chunk block order is invalid".into());
             }
         }
         Ok(())
@@ -570,27 +569,29 @@ impl NodeRuntime {
             candidate.apply_block_to_sync_candidate(block)?;
         }
         let mut next_index = u64::try_from(candidate.blockchain.chain.len())
-            .map_err(|_| "Candidate blockchain uzunluğu u64 aralığını aşıyor")?;
+            .map_err(|_| "Candidate blockchain length exceeds the u64 range")?;
         if next_index < local_height {
-            return Err("Candidate blockchain yerel tip gerisinde kaldı".into());
+            return Err("Candidate blockchain fell behind the local tip".into());
         }
         while next_index < status.total_blocks {
             let chunk = Self::request_chunk(stream, next_index).await?;
             if chunk.total_blocks < status.total_blocks {
-                return Err("Chain sync sırasında remote toplam block sayısı küçüldü".into());
+                return Err(
+                    "Remote total block count decreased during chain synchronization".into(),
+                );
             }
             let remaining = usize::try_from(status.total_blocks - next_index)
-                .map_err(|_| "Remote kalan block sayısı geçersiz")?;
+                .map_err(|_| "Remote remaining block count is invalid")?;
             for block in chunk.blocks.into_iter().take(remaining) {
                 candidate.apply_block_to_sync_candidate(block)?;
             }
             next_index = u64::try_from(candidate.blockchain.chain.len())
-                .map_err(|_| "Candidate blockchain uzunluğu u64 aralığını aşıyor")?;
+                .map_err(|_| "Candidate blockchain length exceeds the u64 range")?;
         }
 
         let mut locked = runtime.lock().await;
         if locked.node.blockchain.chain.len() != original_height {
-            return Err("Chain sync sırasında yerel tip değişti".into());
+            return Err("Local tip changed during chain synchronization".into());
         }
         locked
             .node
@@ -617,41 +618,43 @@ impl NodeRuntime {
             .blockchain
             .chain
             .first()
-            .ok_or("Canonical candidate genesis bulunamadı")?
+            .ok_or("Canonical candidate genesis was not found")?
             .hash
             .clone();
         let remote_genesis = first_chunk
             .blocks
             .first()
-            .ok_or("Remote full-chain chunk genesis içermiyor")?;
+            .ok_or("Remote full-chain chunk does not contain genesis")?;
         if remote_genesis.hash != candidate_genesis_hash
             || remote_genesis.hash != remote_genesis.calculate_hash()
         {
-            return Err("Remote full-chain genesis geçersiz".into());
+            return Err("Remote full-chain genesis is invalid".into());
         }
 
         for block in first_chunk.blocks.into_iter().skip(1) {
             candidate.apply_block_to_sync_candidate(block)?;
         }
         let mut next_index = u64::try_from(candidate.blockchain.chain.len())
-            .map_err(|_| "Candidate blockchain uzunluğu u64 aralığını aşıyor")?;
+            .map_err(|_| "Candidate blockchain length exceeds the u64 range")?;
         while next_index < first_chunk.total_blocks {
             let chunk = Self::request_chunk(stream, next_index).await?;
             if chunk.total_blocks < first_chunk.total_blocks {
-                return Err("Chain sync sırasında remote toplam block sayısı küçüldü".into());
+                return Err(
+                    "Remote total block count decreased during chain synchronization".into(),
+                );
             }
             let remaining = usize::try_from(first_chunk.total_blocks - next_index)
-                .map_err(|_| "Remote kalan block sayısı geçersiz")?;
+                .map_err(|_| "Remote remaining block count is invalid")?;
             for block in chunk.blocks.into_iter().take(remaining) {
                 candidate.apply_block_to_sync_candidate(block)?;
             }
             next_index = u64::try_from(candidate.blockchain.chain.len())
-                .map_err(|_| "Candidate blockchain uzunluğu u64 aralığını aşıyor")?;
+                .map_err(|_| "Candidate blockchain length exceeds the u64 range")?;
         }
 
         let mut locked = runtime.lock().await;
         if locked.node.blockchain.chain.len() != original_height {
-            return Err("Chain sync sırasında yerel tip değişti".into());
+            return Err("Local tip changed during chain synchronization".into());
         }
         locked
             .node
@@ -670,16 +673,11 @@ impl NodeRuntime {
         for action in actions {
             match action {
                 RuntimeAction::Reply(message) => {
-                    if let Err(error) =
-                        TcpTransport::send_message(
-                            stream,
-                            &message,
-                        )
-                        .await
-                    {
-                        if reply_error.is_none() {
+                    match TcpTransport::send_message(stream, &message).await {
+                        Err(error) if reply_error.is_none() => {
                             reply_error = Some(error);
                         }
+                        _ => {}
                     }
                 }
                 RuntimeAction::Broadcast(message) => {
@@ -730,10 +728,10 @@ impl NodeRuntime {
                     .push(RuntimeAction::Reply(self.chain_chunk_response(0)?));
             }
             NetworkMessage::ChainChunkResponse { .. } => {
-                return Err("Beklenmeyen chain chunk response reddedildi".into());
+                return Err("Unexpected chain chunk response rejected".into());
             }
             NetworkMessage::TransactionAck { .. } => {
-                return Err("Beklenmeyen transaction ACK reddedildi".into());
+                return Err("Unexpected transaction ACK rejected".into());
             }
             NetworkMessage::Transaction(transaction) => {
                 let transaction_id = if crate::protocol::is_fixed_hex(
@@ -747,42 +745,28 @@ impl NodeRuntime {
 
                 match self
                     .node
-                    .receive_transaction_with_result(
-                        transaction.clone(),
-                    )
+                    .receive_transaction_with_result(transaction.clone())
                 {
                     Ok(()) => {
-                        println!(
-                            "Transaction accepted: {transaction_id}"
-                        );
+                        println!("Transaction accepted: {transaction_id}");
 
                         if one_shot_client {
-                            outcome.actions.push(
-                                RuntimeAction::Reply(
-                                    NetworkMessage::TransactionAck {
-                                        transaction_id: transaction_id.clone(),
-                                        accepted: true,
-                                        reason: None,
-                                    },
-                                ),
-                            );
+                            outcome.actions.push(RuntimeAction::Reply(
+                                NetworkMessage::TransactionAck {
+                                    transaction_id: transaction_id.clone(),
+                                    accepted: true,
+                                    reason: None,
+                                },
+                            ));
                         }
 
-                        outcome.actions.push(
-                            RuntimeAction::Broadcast(
-                                NetworkMessage::Transaction(
-                                    transaction,
-                                ),
-                            ),
-                        );
-                        self.append_pending_block_action(
-                            &mut outcome,
-                        );
+                        outcome.actions.push(RuntimeAction::Broadcast(
+                            NetworkMessage::Transaction(transaction),
+                        ));
+                        self.append_pending_block_action(&mut outcome);
                     }
                     Err(error) => {
-                        println!(
-                            "Transaction rejected: {transaction_id} - {error}"
-                        );
+                        println!("Transaction rejected: {transaction_id} - {error}");
 
                         if one_shot_client
                             && crate::protocol::is_fixed_hex(
@@ -790,18 +774,13 @@ impl NodeRuntime {
                                 crate::protocol::HASH_HEX_LENGTH,
                             )
                         {
-                            outcome.actions.push(
-                                RuntimeAction::Reply(
-                                    NetworkMessage::TransactionAck {
-                                        transaction_id,
-                                        accepted: false,
-                                        reason: Some(
-                                            "Transaction rejected by node"
-                                                .to_string(),
-                                        ),
-                                    },
-                                ),
-                            );
+                            outcome.actions.push(RuntimeAction::Reply(
+                                NetworkMessage::TransactionAck {
+                                    transaction_id,
+                                    accepted: false,
+                                    reason: Some("Transaction rejected by node".to_string()),
+                                },
+                            ));
                         }
                     }
                 }
@@ -832,17 +811,17 @@ impl NodeRuntime {
                 .actions
                 .push(RuntimeAction::Broadcast(NetworkMessage::Block(block))),
             Ok(None) => {}
-            Err(error) => println!("Validator block üretim denemesi başarısız: {error}"),
+            Err(error) => println!("Validator block production attempt failed: {error}"),
         }
     }
 
     fn chain_chunk_response(&self, start_index: u64) -> Result<NetworkMessage, String> {
         let start = usize::try_from(start_index)
-            .map_err(|_| "Chain chunk başlangıç index geçersiz".to_string())?;
+            .map_err(|_| "Chain chunk start index is invalid".to_string())?;
         let total_blocks = self.node.blockchain.chain.len();
 
         if start > total_blocks {
-            return Err("Chain chunk başlangıcı zincir uzunluğunu aşıyor".into());
+            return Err("Chain chunk start exceeds the chain length".into());
         }
 
         let end = start
@@ -853,7 +832,7 @@ impl NodeRuntime {
         Ok(NetworkMessage::ChainChunkResponse {
             start_index,
             total_blocks: u64::try_from(total_blocks)
-                .map_err(|_| "Blockchain uzunluğu u64 aralığını aşıyor".to_string())?,
+                .map_err(|_| "Blockchain length exceeds the u64 range".to_string())?,
             blocks,
         })
     }
@@ -872,11 +851,16 @@ impl NodeRuntime {
             return Ok(None);
         }
 
-        let tip = self.node.blockchain.chain.last().ok_or("Blockchain boş")?;
+        let tip = self
+            .node
+            .blockchain
+            .chain
+            .last()
+            .ok_or("Blockchain is empty")?;
         let selected = self
             .node
             .select_validator(&tip.hash)
-            .ok_or("Validator seçilemedi")?;
+            .ok_or("Validator could not be selected")?;
 
         if selected != identity.address() {
             return Ok(None);

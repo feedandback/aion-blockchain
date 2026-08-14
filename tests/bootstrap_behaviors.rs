@@ -20,8 +20,7 @@ const PRODUCTION_VALIDATOR_B_ADDRESS: &str =
     "fe36b693330e3e48ae0ed1a78f92e38a99eb228bc3d3ab617ac70d75b28f5e78";
 const GENESIS_FINGERPRINT: &str =
     "a8058a98726615210584690b23e3acb08586fc775cdf481b5f822ef1839bc923";
-const GENESIS_HASH: &str =
-    "cd5bf53fb00481798aeef82625ce208ca0ecf714716da136ccc7124de8855647";
+const GENESIS_HASH: &str = "cd5bf53fb00481798aeef82625ce208ca0ecf714716da136ccc7124de8855647";
 
 fn bootstrap() -> CanonicalBootstrap {
     canonical_bootstrap().expect("canonical bootstrap must be valid")
@@ -198,10 +197,7 @@ fn canonical_validator_set_uses_production_addresses_and_excludes_demo_addresses
     assert_eq!(GENESIS_VALIDATOR_A_ADDRESS, PRODUCTION_VALIDATOR_A_ADDRESS);
     assert_eq!(GENESIS_VALIDATOR_B_ADDRESS, PRODUCTION_VALIDATOR_B_ADDRESS);
 
-    for previous_address in [
-        PREVIOUS_VALIDATOR_A_ADDRESS,
-        PREVIOUS_VALIDATOR_B_ADDRESS,
-    ] {
+    for previous_address in [PREVIOUS_VALIDATOR_A_ADDRESS, PREVIOUS_VALIDATOR_B_ADDRESS] {
         assert!(!first.consensus.is_validator_allowed(previous_address));
         assert!(!first.state.accounts.contains_key(previous_address));
     }

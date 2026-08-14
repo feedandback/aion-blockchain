@@ -1,15 +1,6 @@
-use ed25519_dalek::{
-    Signature,
-    Signer,
-    SigningKey,
-    Verifier,
-    VerifyingKey,
-};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand_core::OsRng;
-use sha2::{
-    Digest,
-    Sha256,
-};
+use sha2::{Digest, Sha256};
 
 #[derive(Debug)]
 pub struct Wallet {
@@ -18,32 +9,25 @@ pub struct Wallet {
     address: String,
 }
 
+impl Default for Wallet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Wallet {
     pub fn new() -> Self {
         let mut rng = OsRng;
 
-        let signing_key =
-            SigningKey::generate(
-                &mut rng,
-            );
+        let signing_key = SigningKey::generate(&mut rng);
 
-        Self::from_signing_key(
-            signing_key,
-        )
+        Self::from_signing_key(signing_key)
     }
 
-    fn from_signing_key(
-        signing_key: SigningKey,
-    ) -> Self {
-        let verifying_key =
-            signing_key
-                .verifying_key();
+    fn from_signing_key(signing_key: SigningKey) -> Self {
+        let verifying_key = signing_key.verifying_key();
 
-        let address =
-            Self::address_from_public_key_bytes(
-                verifying_key
-                    .as_bytes(),
-            );
+        let address = Self::address_from_public_key_bytes(verifying_key.as_bytes());
 
         Self {
             signing_key,
@@ -52,84 +36,39 @@ impl Wallet {
         }
     }
 
-    pub fn from_private_key_hex(
-        private_key_hex: &str,
-    ) -> Result<Self, String> {
-        let private_key_bytes =
-            hex::decode(
-                private_key_hex,
-            )
-            .map_err(
-                |_| {
-                    "Private key hex formatı geçersiz"
-                        .to_string()
-                },
-            )?;
+    pub fn from_private_key_hex(private_key_hex: &str) -> Result<Self, String> {
+        let private_key_bytes = hex::decode(private_key_hex)
+            .map_err(|_| "Private key hex format is invalid".to_string())?;
 
-        let private_key_array:
-            [u8; 32] =
-            private_key_bytes
-                .try_into()
-                .map_err(
-                    |_| {
-                        "Private key 32 byte olmalı"
-                            .to_string()
-                    },
-                )?;
+        let private_key_array: [u8; 32] = private_key_bytes
+            .try_into()
+            .map_err(|_| "Private key must be 32 bytes".to_string())?;
 
-        let signing_key =
-            SigningKey::from_bytes(
-                &private_key_array,
-            );
+        let signing_key = SigningKey::from_bytes(&private_key_array);
 
-        Ok(
-            Self::from_signing_key(
-                signing_key,
-            ),
-        )
+        Ok(Self::from_signing_key(signing_key))
     }
 
-    pub fn private_key_hex(
-        &self,
-    ) -> String {
-        hex::encode(
-            self.signing_key
-                .to_bytes(),
-        )
+    pub fn private_key_hex(&self) -> String {
+        hex::encode(self.signing_key.to_bytes())
     }
 
-    pub fn address(
-        &self,
-    ) -> &str {
+    pub fn address(&self) -> &str {
         &self.address
     }
 
-    pub fn node_id(
-        &self,
-    ) -> &str {
+    pub fn node_id(&self) -> &str {
         &self.address
     }
 
-    pub fn public_key_hex(
-        &self,
-    ) -> String {
-        hex::encode(
-            self.verifying_key
-                .as_bytes(),
-        )
+    pub fn public_key_hex(&self) -> String {
+        hex::encode(self.verifying_key.as_bytes())
     }
 
-    pub fn sign(
-        &self,
-        message: &[u8],
-    ) -> String {
-        let signature =
-            self.signing_key
-                .sign(message);
+    pub fn sign(&self, message: &[u8]) -> String {
+        let signature = self.signing_key.sign(message);
 
-        hex::encode(
-            signature.to_bytes(),
-        )
+        hex::encode(signature.to_bytes())
     }
 
     pub fn node_handshake_message(
@@ -162,25 +101,24 @@ impl Wallet {
         timestamp: u64,
         challenge: &str,
     ) -> String {
-        let public_key_hex =
-            self.public_key_hex();
+        let public_key_hex = self.public_key_hex();
 
-        let message =
-            Self::node_handshake_message(
-                self.node_id(),
-                &public_key_hex,
-                listen_address,
-                network_id,
-                protocol_version,
-                timestamp,
-                challenge,
-            );
+        let message = Self::node_handshake_message(
+            self.node_id(),
+            &public_key_hex,
+            listen_address,
+            network_id,
+            protocol_version,
+            timestamp,
+            challenge,
+        );
 
-        self.sign(
-            &message,
-        )
+        self.sign(&message)
     }
 
+    // The protocol verification API intentionally mirrors the signed
+    // handshake fields one-to-one.
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_node_handshake(
         node_id: &str,
         public_key_hex: &str,
@@ -191,38 +129,28 @@ impl Wallet {
         challenge: &str,
         signature_hex: &str,
     ) -> bool {
-        let derived_node_id =
-            match Self::address_from_public_key(
-                public_key_hex,
-            ) {
-                Some(address) => address,
-                None => {
-                    return false;
-                }
-            };
+        let derived_node_id = match Self::address_from_public_key(public_key_hex) {
+            Some(address) => address,
+            None => {
+                return false;
+            }
+        };
 
-        if derived_node_id
-            != node_id
-        {
+        if derived_node_id != node_id {
             return false;
         }
 
-        let message =
-            Self::node_handshake_message(
-                node_id,
-                public_key_hex,
-                listen_address,
-                network_id,
-                protocol_version,
-                timestamp,
-                challenge,
-            );
-
-        Self::verify(
+        let message = Self::node_handshake_message(
+            node_id,
             public_key_hex,
-            &message,
-            signature_hex,
-        )
+            listen_address,
+            network_id,
+            protocol_version,
+            timestamp,
+            challenge,
+        );
+
+        Self::verify(public_key_hex, &message, signature_hex)
     }
 
     pub fn node_handshake_ack_message(
@@ -255,25 +183,24 @@ impl Wallet {
         challenge: &str,
         accepted: bool,
     ) -> String {
-        let public_key_hex =
-            self.public_key_hex();
+        let public_key_hex = self.public_key_hex();
 
-        let message =
-            Self::node_handshake_ack_message(
-                self.node_id(),
-                &public_key_hex,
-                network_id,
-                protocol_version,
-                timestamp,
-                challenge,
-                accepted,
-            );
+        let message = Self::node_handshake_ack_message(
+            self.node_id(),
+            &public_key_hex,
+            network_id,
+            protocol_version,
+            timestamp,
+            challenge,
+            accepted,
+        );
 
-        self.sign(
-            &message,
-        )
+        self.sign(&message)
     }
 
+    // The protocol verification API intentionally mirrors the signed
+    // acknowledgement fields one-to-one.
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_node_handshake_ack(
         node_id: &str,
         public_key_hex: &str,
@@ -284,149 +211,86 @@ impl Wallet {
         accepted: bool,
         signature_hex: &str,
     ) -> bool {
-        let derived_node_id =
-            match Self::address_from_public_key(
-                public_key_hex,
-            ) {
-                Some(address) => address,
-                None => {
-                    return false;
-                }
-            };
+        let derived_node_id = match Self::address_from_public_key(public_key_hex) {
+            Some(address) => address,
+            None => {
+                return false;
+            }
+        };
 
-        if derived_node_id
-            != node_id
-        {
+        if derived_node_id != node_id {
             return false;
         }
 
-        let message =
-            Self::node_handshake_ack_message(
-                node_id,
-                public_key_hex,
-                network_id,
-                protocol_version,
-                timestamp,
-                challenge,
-                accepted,
-            );
-
-        Self::verify(
+        let message = Self::node_handshake_ack_message(
+            node_id,
             public_key_hex,
-            &message,
-            signature_hex,
-        )
-    }
-
-    pub fn address_from_public_key(
-        public_key_hex: &str,
-    ) -> Option<String> {
-        let public_key_bytes =
-            hex::decode(
-                public_key_hex,
-            )
-            .ok()?;
-
-        let public_key_array:
-            [u8; 32] =
-            public_key_bytes
-                .try_into()
-                .ok()?;
-
-        VerifyingKey::from_bytes(
-            &public_key_array,
-        )
-        .ok()?;
-
-        Some(
-            Self::address_from_public_key_bytes(
-                &public_key_array,
-            ),
-        )
-    }
-
-    pub fn verify(
-        public_key_hex: &str,
-        message: &[u8],
-        signature_hex: &str,
-    ) -> bool {
-        let public_key_bytes =
-            match hex::decode(
-                public_key_hex,
-            ) {
-                Ok(bytes) => bytes,
-                Err(_) => {
-                    return false;
-                }
-            };
-
-        let signature_bytes =
-            match hex::decode(
-                signature_hex,
-            ) {
-                Ok(bytes) => bytes,
-                Err(_) => {
-                    return false;
-                }
-            };
-
-        let public_key_array:
-            [u8; 32] =
-            match public_key_bytes
-                .try_into()
-            {
-                Ok(bytes) => bytes,
-                Err(_) => {
-                    return false;
-                }
-            };
-
-        let signature_array:
-            [u8; 64] =
-            match signature_bytes
-                .try_into()
-            {
-                Ok(bytes) => bytes,
-                Err(_) => {
-                    return false;
-                }
-            };
-
-        let verifying_key =
-            match VerifyingKey::from_bytes(
-                &public_key_array,
-            ) {
-                Ok(key) => key,
-                Err(_) => {
-                    return false;
-                }
-            };
-
-        let signature =
-            Signature::from_bytes(
-                &signature_array,
-            );
-
-        verifying_key
-            .verify(
-                message,
-                &signature,
-            )
-            .is_ok()
-    }
-
-    fn address_from_public_key_bytes(
-        public_key_bytes: &[u8],
-    ) -> String {
-        let mut hasher =
-            Sha256::new();
-
-        hasher.update(
-            public_key_bytes,
+            network_id,
+            protocol_version,
+            timestamp,
+            challenge,
+            accepted,
         );
 
-        hex::encode(
-            hasher.finalize(),
-        )
+        Self::verify(public_key_hex, &message, signature_hex)
+    }
+
+    pub fn address_from_public_key(public_key_hex: &str) -> Option<String> {
+        let public_key_bytes = hex::decode(public_key_hex).ok()?;
+
+        let public_key_array: [u8; 32] = public_key_bytes.try_into().ok()?;
+
+        VerifyingKey::from_bytes(&public_key_array).ok()?;
+
+        Some(Self::address_from_public_key_bytes(&public_key_array))
+    }
+
+    pub fn verify(public_key_hex: &str, message: &[u8], signature_hex: &str) -> bool {
+        let public_key_bytes = match hex::decode(public_key_hex) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return false;
+            }
+        };
+
+        let signature_bytes = match hex::decode(signature_hex) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return false;
+            }
+        };
+
+        let public_key_array: [u8; 32] = match public_key_bytes.try_into() {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return false;
+            }
+        };
+
+        let signature_array: [u8; 64] = match signature_bytes.try_into() {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return false;
+            }
+        };
+
+        let verifying_key = match VerifyingKey::from_bytes(&public_key_array) {
+            Ok(key) => key,
+            Err(_) => {
+                return false;
+            }
+        };
+
+        let signature = Signature::from_bytes(&signature_array);
+
+        verifying_key.verify(message, &signature).is_ok()
+    }
+
+    fn address_from_public_key_bytes(public_key_bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+
+        hasher.update(public_key_bytes);
+
+        hex::encode(hasher.finalize())
     }
 }

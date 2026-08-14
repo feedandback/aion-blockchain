@@ -50,10 +50,7 @@ fn consensus_with_address(address: &str) -> Consensus {
     consensus
 }
 
-fn generate_candidate(
-    directory: &Path,
-    password: &str,
-) -> (ValidatorCandidateKeystore, String) {
+fn generate_candidate(directory: &Path, password: &str) -> (ValidatorCandidateKeystore, String) {
     let keystore = ValidatorCandidateKeystore::at(directory);
     let address = keystore
         .generate(password)
@@ -92,8 +89,8 @@ fn candidate_generation_succeeds() {
 fn candidate_private_key_is_not_stored_as_plaintext() {
     let directory = TestDirectory::new("encrypted-payload");
     let (keystore, address) = generate_candidate(directory.path(), PASSWORD);
-    let contents = std::fs::read_to_string(keystore.path())
-        .expect("candidate envelope must be readable");
+    let contents =
+        std::fs::read_to_string(keystore.path()).expect("candidate envelope must be readable");
     let envelope: serde_json::Value =
         serde_json::from_str(&contents).expect("candidate envelope must be valid JSON");
 
@@ -179,7 +176,7 @@ fn candidate_address_command_rejects_the_wrong_password() {
         String::from_utf8(output.stderr)
             .expect("command error output must be UTF-8")
             .replace("\r\n", "\n"),
-        "Candidate validator address okunamadı\n"
+        "Candidate validator address could not be read\n"
     );
     assert_eq!(
         std::fs::read(keystore.path()).expect("candidate must remain readable"),
@@ -247,8 +244,7 @@ fn second_candidate_generation_does_not_overwrite_the_first() {
 fn noncanonical_candidate_cannot_be_activated() {
     let directory = TestDirectory::new("noncanonical-activation");
     let (candidate_keystore, _) = generate_candidate(directory.path(), PASSWORD);
-    let original =
-        std::fs::read(candidate_keystore.path()).expect("candidate must be readable");
+    let original = std::fs::read(candidate_keystore.path()).expect("candidate must be readable");
     let consensus = Consensus::new();
 
     assert!(
@@ -360,8 +356,7 @@ fn failed_activation_preserves_the_candidate() {
     let directory = TestDirectory::new("failed-activation-preserves");
     let (candidate_keystore, address) = generate_candidate(directory.path(), PASSWORD);
     let consensus = consensus_with_address(&address);
-    let original =
-        std::fs::read(candidate_keystore.path()).expect("candidate must be readable");
+    let original = std::fs::read(candidate_keystore.path()).expect("candidate must be readable");
 
     assert!(
         candidate_keystore

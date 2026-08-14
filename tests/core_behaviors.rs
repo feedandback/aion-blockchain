@@ -191,8 +191,7 @@ fn block_hash_and_previous_hash_are_validated() {
     assert!(chain.add_received_block(valid_block).is_ok());
     assert!(chain.is_valid());
 
-    let mut wrong_previous_hash =
-        signed_block_with_normal_transaction(&genesis, &validator);
+    let mut wrong_previous_hash = signed_block_with_normal_transaction(&genesis, &validator);
     wrong_previous_hash.previous_hash = "11".repeat(32);
     wrong_previous_hash.hash = wrong_previous_hash.calculate_hash();
     wrong_previous_hash.sign(validator.sign(wrong_previous_hash.hash.as_bytes()));
@@ -262,8 +261,7 @@ fn fee_liquidity_treasury_and_burn_match_protocol_percentages() {
     assert!(economy.validate_fee(2_500_000, 25));
     assert!(!economy.validate_fee(2_500_000, 24));
 
-    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) =
-        economy.distribute_fee(1_000);
+    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) = economy.distribute_fee(1_000);
     assert_eq!(
         (validator_fee, liquidity_fee, treasury_fee, burn_fee),
         (150, 800, 50, 0)
@@ -292,8 +290,7 @@ fn fee_liquidity_treasury_and_burn_match_protocol_percentages() {
 fn fee_distribution_preserves_every_charged_unit() {
     let economy = Economy::new();
     let fee = economy.calculate_fee(100_100_000);
-    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) =
-        economy.distribute_fee(fee);
+    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) = economy.distribute_fee(fee);
 
     assert_eq!(fee, 1_001);
     assert_eq!(
@@ -341,8 +338,7 @@ fn treasury_receives_five_percent_of_fees() {
 #[test]
 fn validator_receives_the_fee_distribution_remainder() {
     let economy = Economy::new();
-    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) =
-        economy.distribute_fee(1_001);
+    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) = economy.distribute_fee(1_001);
 
     assert_eq!(economy.validator_fee_percent, 15);
     assert_eq!(liquidity_fee, 800);
@@ -366,8 +362,7 @@ fn fee_distribution_never_loses_a_micro_kbn() {
     let economy = Economy::new();
 
     for fee in [10, 11, 19, 20, 21, 99, 100, 101, 1_001, u64::MAX] {
-        let (validator_fee, liquidity_fee, treasury_fee, burn_fee) =
-            economy.distribute_fee(fee);
+        let (validator_fee, liquidity_fee, treasury_fee, burn_fee) = economy.distribute_fee(fee);
         let distributed = u128::from(validator_fee)
             + u128::from(liquidity_fee)
             + u128::from(treasury_fee)
@@ -421,8 +416,7 @@ fn large_transfer_fee_and_distribution_do_not_overflow() {
     );
 
     let fee = economy.calculate_fee(u64::MAX);
-    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) =
-        economy.distribute_fee(fee);
+    let (validator_fee, liquidity_fee, treasury_fee, burn_fee) = economy.distribute_fee(fee);
 
     assert_eq!(fee, 184_467_440_737_095);
     assert_eq!(
@@ -433,8 +427,7 @@ fn large_transfer_fee_and_distribution_do_not_overflow() {
         u128::from(fee)
     );
 
-    let (max_validator, max_liquidity, max_treasury, max_burn) =
-        economy.distribute_fee(u64::MAX);
+    let (max_validator, max_liquidity, max_treasury, max_burn) = economy.distribute_fee(u64::MAX);
     assert_eq!(max_validator, 2_767_011_611_056_432_743);
     assert_eq!(max_liquidity, 14_757_395_258_967_641_292);
     assert_eq!(max_treasury, 922_337_203_685_477_580);

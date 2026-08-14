@@ -63,8 +63,8 @@ fn consensus_with(wallets: &[&Wallet]) -> Consensus {
 }
 
 fn free_loopback_address() -> String {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("free loopback port must be allocated");
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("free loopback port must be allocated");
     let address = listener
         .local_addr()
         .expect("allocated loopback address must be readable");
@@ -107,18 +107,14 @@ fn two_free_loopback_addresses() -> (String, String) {
     (first_address, second_address)
 }
 
-async fn wait_for_persisted_chain(
-    data_directory: &Path,
-    expected_height: usize,
-) -> Vec<Block> {
+async fn wait_for_persisted_chain(data_directory: &Path, expected_height: usize) -> Vec<Block> {
     tokio::time::timeout(Duration::from_secs(8), async {
         loop {
             if let Some(chain) = Storage::load_blockchain_from(data_directory)
                 .expect("persisted blockchain must remain readable")
+                && chain.len() >= expected_height
             {
-                if chain.len() >= expected_height {
-                    return chain;
-                }
+                return chain;
             }
 
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -438,12 +434,8 @@ async fn runtime_one_shot_transaction_returns_acceptance_ack() {
     state.create_account(recipient.address().to_string(), 0);
     state.create_account(validator.address().to_string(), 0);
 
-    let node = Node::new_with_data_directory(
-        blockchain,
-        state,
-        consensus,
-        directory.path().to_path_buf(),
-    );
+    let node =
+        Node::new_with_data_directory(blockchain, state, consensus, directory.path().to_path_buf());
     let fee = node.blockchain.economy.calculate_fee(1);
     let mut transaction = Transaction::new(
         sender.address().to_string(),
@@ -456,8 +448,7 @@ async fn runtime_one_shot_transaction_returns_acceptance_ack() {
     transaction.sign(sender.sign(&transaction.message()));
 
     let transaction_id = transaction.id.clone();
-    let runtime =
-        NodeRuntime::from_node(node, None).expect("observer runtime must initialize");
+    let runtime = NodeRuntime::from_node(node, None).expect("observer runtime must initialize");
     let listen_address = free_loopback_address();
     let server_address = listen_address.clone();
 
@@ -635,10 +626,7 @@ fn runtime_rebuilds_state_and_nonce_from_persisted_chain() {
         .expect("replayed node must remain usable as a runtime");
     assert_eq!(restarted_runtime.role(), NodeRole::Observer);
     assert_eq!(restarted_runtime.node().blockchain.height(), 2);
-    assert_eq!(
-        restarted_runtime.node().state.nonce_of(sender.address()),
-        1
-    );
+    assert_eq!(restarted_runtime.node().state.nonce_of(sender.address()), 1);
 }
 
 #[tokio::test]
@@ -657,12 +645,11 @@ async fn two_validator_runtimes_ack_produce_and_propagate_the_same_block() {
         .address
         .clone();
 
-    let (producer_wallet, follower_wallet) =
-        if selected_address == validator_a.address() {
-            (&validator_a, &validator_b)
-        } else {
-            (&validator_b, &validator_a)
-        };
+    let (producer_wallet, follower_wallet) = if selected_address == validator_a.address() {
+        (&validator_a, &validator_b)
+    } else {
+        (&validator_b, &validator_a)
+    };
 
     let producer_address = producer_wallet.address().to_string();
     let follower_address = follower_wallet.address().to_string();
@@ -688,25 +675,18 @@ async fn two_validator_runtimes_ack_produce_and_propagate_the_same_block() {
         )
     };
 
-    let (producer_listen_address, follower_listen_address) =
-        two_free_loopback_addresses();
+    let (producer_listen_address, follower_listen_address) = two_free_loopback_addresses();
 
     let mut producer_node = build_node(producer_directory.path());
     let follower_node = build_node(follower_directory.path());
 
     assert!(producer_node.add_peer(follower_listen_address.clone()));
 
-    Storage::save_blockchain_to(
-        producer_directory.path(),
-        &producer_node.blockchain.chain,
-    )
-    .expect("producer genesis must be persisted");
+    Storage::save_blockchain_to(producer_directory.path(), &producer_node.blockchain.chain)
+        .expect("producer genesis must be persisted");
 
-    Storage::save_blockchain_to(
-        follower_directory.path(),
-        &follower_node.blockchain.chain,
-    )
-    .expect("follower genesis must be persisted");
+    Storage::save_blockchain_to(follower_directory.path(), &follower_node.blockchain.chain)
+        .expect("follower genesis must be persisted");
 
     let amount = 1u64;
     let fee = producer_node.blockchain.economy.calculate_fee(amount);
@@ -721,24 +701,16 @@ async fn two_validator_runtimes_ack_produce_and_propagate_the_same_block() {
     transaction.sign(producer_wallet.sign(&transaction.message()));
     let transaction_id = transaction.id.clone();
 
-    let producer_identity =
-        ValidatorIdentity::from_private_key(&producer_key, &consensus)
-            .expect("selected producer identity must be authorized");
-    let follower_identity =
-        ValidatorIdentity::from_private_key(&follower_key, &consensus)
-            .expect("follower validator identity must be authorized");
+    let producer_identity = ValidatorIdentity::from_private_key(&producer_key, &consensus)
+        .expect("selected producer identity must be authorized");
+    let follower_identity = ValidatorIdentity::from_private_key(&follower_key, &consensus)
+        .expect("follower validator identity must be authorized");
 
-    let producer_runtime = NodeRuntime::from_node(
-        producer_node,
-        Some(producer_identity),
-    )
-    .expect("producer runtime must initialize");
+    let producer_runtime = NodeRuntime::from_node(producer_node, Some(producer_identity))
+        .expect("producer runtime must initialize");
 
-    let follower_runtime = NodeRuntime::from_node(
-        follower_node,
-        Some(follower_identity),
-    )
-    .expect("follower runtime must initialize");
+    let follower_runtime = NodeRuntime::from_node(follower_node, Some(follower_identity))
+        .expect("follower runtime must initialize");
 
     let follower_server_address = follower_listen_address.clone();
     let follower_server = tokio::spawn(async move {
@@ -791,10 +763,8 @@ async fn two_validator_runtimes_ack_produce_and_propagate_the_same_block() {
         _ => panic!("producer runtime must return TransactionAck"),
     }
 
-    let producer_chain =
-        wait_for_persisted_chain(producer_directory.path(), 2).await;
-    let follower_chain =
-        wait_for_persisted_chain(follower_directory.path(), 2).await;
+    let producer_chain = wait_for_persisted_chain(producer_directory.path(), 2).await;
+    let follower_chain = wait_for_persisted_chain(follower_directory.path(), 2).await;
 
     let producer_tip = producer_chain
         .last()
@@ -811,14 +781,18 @@ async fn two_validator_runtimes_ack_produce_and_propagate_the_same_block() {
     assert_eq!(producer_tip.validator, selected_address);
     assert_eq!(follower_tip.validator, selected_address);
 
-    assert!(producer_tip
-        .transactions
-        .iter()
-        .any(|stored| stored.id == transaction_id));
-    assert!(follower_tip
-        .transactions
-        .iter()
-        .any(|stored| stored.id == transaction_id));
+    assert!(
+        producer_tip
+            .transactions
+            .iter()
+            .any(|stored| stored.id == transaction_id)
+    );
+    assert!(
+        follower_tip
+            .transactions
+            .iter()
+            .any(|stored| stored.id == transaction_id)
+    );
 
     producer_server.abort();
     follower_server.abort();
@@ -842,12 +816,11 @@ async fn late_joining_runtime_catches_up_from_an_existing_peer() {
         .address
         .clone();
 
-    let (producer_wallet, recipient_wallet) =
-        if selected_address == validator_a.address() {
-            (&validator_a, &validator_b)
-        } else {
-            (&validator_b, &validator_a)
-        };
+    let (producer_wallet, recipient_wallet) = if selected_address == validator_a.address() {
+        (&validator_a, &validator_b)
+    } else {
+        (&validator_b, &validator_a)
+    };
 
     let producer_address = producer_wallet.address().to_string();
     let recipient_address = recipient_wallet.address().to_string();
@@ -873,11 +846,8 @@ async fn late_joining_runtime_catches_up_from_an_existing_peer() {
 
     let mut source_node = build_genesis_node(source_directory.path());
 
-    Storage::save_blockchain_to(
-        source_directory.path(),
-        &source_node.blockchain.chain,
-    )
-    .expect("source genesis must be persisted");
+    Storage::save_blockchain_to(source_directory.path(), &source_node.blockchain.chain)
+        .expect("source genesis must be persisted");
 
     let amount = 1u64;
     let fee = source_node.blockchain.economy.calculate_fee(amount);
@@ -894,15 +864,12 @@ async fn late_joining_runtime_catches_up_from_an_existing_peer() {
 
     assert!(source_node.add_transaction(transaction));
 
-    let producer_identity = ValidatorIdentity::from_private_key(
-        &producer_wallet.private_key_hex(),
-        &consensus,
-    )
-    .expect("selected source validator must be authorized");
+    let producer_identity =
+        ValidatorIdentity::from_private_key(&producer_wallet.private_key_hex(), &consensus)
+            .expect("selected source validator must be authorized");
 
-    let mut source_runtime =
-        NodeRuntime::from_node(source_node, Some(producer_identity))
-            .expect("source runtime must initialize");
+    let mut source_runtime = NodeRuntime::from_node(source_node, Some(producer_identity))
+        .expect("source runtime must initialize");
 
     let produced = source_runtime
         .try_produce_block(GENESIS_TIMESTAMP + 1)
@@ -910,27 +877,24 @@ async fn late_joining_runtime_catches_up_from_an_existing_peer() {
 
     assert_eq!(source_runtime.node().blockchain.height(), 2);
     assert_eq!(produced.validator, selected_address);
-    assert!(produced
-        .transactions
-        .iter()
-        .any(|stored| stored.id == transaction_id));
+    assert!(
+        produced
+            .transactions
+            .iter()
+            .any(|stored| stored.id == transaction_id)
+    );
 
     let late_node = build_genesis_node(late_directory.path());
 
-    Storage::save_blockchain_to(
-        late_directory.path(),
-        &late_node.blockchain.chain,
-    )
-    .expect("late node genesis must be persisted");
+    Storage::save_blockchain_to(late_directory.path(), &late_node.blockchain.chain)
+        .expect("late node genesis must be persisted");
 
     assert_eq!(late_node.blockchain.height(), 1);
 
     let late_runtime =
-        NodeRuntime::from_node(late_node, None)
-            .expect("late observer runtime must initialize");
+        NodeRuntime::from_node(late_node, None).expect("late observer runtime must initialize");
 
-    let (source_listen_address, late_listen_address) =
-        two_free_loopback_addresses();
+    let (source_listen_address, late_listen_address) = two_free_loopback_addresses();
 
     let source_server_address = source_listen_address.clone();
     let source_server = tokio::spawn(async move {
@@ -957,8 +921,7 @@ async fn late_joining_runtime_catches_up_from_an_existing_peer() {
 
     wait_for_listener(&late_listen_address).await;
 
-    let synchronized_chain =
-        wait_for_persisted_chain(late_directory.path(), 2).await;
+    let synchronized_chain = wait_for_persisted_chain(late_directory.path(), 2).await;
 
     assert_eq!(synchronized_chain.len(), 2);
 
@@ -969,10 +932,12 @@ async fn late_joining_runtime_catches_up_from_an_existing_peer() {
     assert_eq!(synchronized_tip.index, 1);
     assert_eq!(synchronized_tip.hash, produced.hash);
     assert_eq!(synchronized_tip.validator, selected_address);
-    assert!(synchronized_tip
-        .transactions
-        .iter()
-        .any(|stored| stored.id == transaction_id));
+    assert!(
+        synchronized_tip
+            .transactions
+            .iter()
+            .any(|stored| stored.id == transaction_id)
+    );
 
     let source_chain = Storage::load_blockchain_from(source_directory.path())
         .expect("source persisted chain must be readable")
@@ -1018,12 +983,11 @@ async fn runtime_retries_unavailable_peer_and_syncs_after_peer_comes_online() {
         .address
         .clone();
 
-    let (producer_wallet, recipient_wallet) =
-        if selected_address == validator_a.address() {
-            (&validator_a, &validator_b)
-        } else {
-            (&validator_b, &validator_a)
-        };
+    let (producer_wallet, recipient_wallet) = if selected_address == validator_a.address() {
+        (&validator_a, &validator_b)
+    } else {
+        (&validator_b, &validator_a)
+    };
 
     let producer_address = producer_wallet.address().to_string();
     let recipient_address = recipient_wallet.address().to_string();
@@ -1049,11 +1013,8 @@ async fn runtime_retries_unavailable_peer_and_syncs_after_peer_comes_online() {
 
     let mut source_node = build_genesis_node(source_directory.path());
 
-    Storage::save_blockchain_to(
-        source_directory.path(),
-        &source_node.blockchain.chain,
-    )
-    .expect("source genesis must be persisted");
+    Storage::save_blockchain_to(source_directory.path(), &source_node.blockchain.chain)
+        .expect("source genesis must be persisted");
 
     let amount = 1u64;
     let fee = source_node.blockchain.economy.calculate_fee(amount);
@@ -1070,15 +1031,12 @@ async fn runtime_retries_unavailable_peer_and_syncs_after_peer_comes_online() {
 
     assert!(source_node.add_transaction(transaction));
 
-    let producer_identity = ValidatorIdentity::from_private_key(
-        &producer_wallet.private_key_hex(),
-        &consensus,
-    )
-    .expect("selected source validator must be authorized");
+    let producer_identity =
+        ValidatorIdentity::from_private_key(&producer_wallet.private_key_hex(), &consensus)
+            .expect("selected source validator must be authorized");
 
-    let mut source_runtime =
-        NodeRuntime::from_node(source_node, Some(producer_identity))
-            .expect("source runtime must initialize");
+    let mut source_runtime = NodeRuntime::from_node(source_node, Some(producer_identity))
+        .expect("source runtime must initialize");
 
     let produced = source_runtime
         .try_produce_block(GENESIS_TIMESTAMP + 1)
@@ -1096,12 +1054,10 @@ async fn runtime_retries_unavailable_peer_and_syncs_after_peer_comes_online() {
 
     assert_eq!(recovering_node.blockchain.height(), 1);
 
-    let recovering_runtime =
-        NodeRuntime::from_node(recovering_node, None)
-            .expect("recovering observer runtime must initialize");
+    let recovering_runtime = NodeRuntime::from_node(recovering_node, None)
+        .expect("recovering observer runtime must initialize");
 
-    let (source_listen_address, recovering_listen_address) =
-        two_free_loopback_addresses();
+    let (source_listen_address, recovering_listen_address) = two_free_loopback_addresses();
 
     let recovering_server_address = recovering_listen_address.clone();
     let unavailable_source_peer = source_listen_address.clone();
@@ -1120,10 +1076,9 @@ async fn runtime_retries_unavailable_peer_and_syncs_after_peer_comes_online() {
     // while the configured peer is intentionally still offline.
     tokio::time::sleep(Duration::from_millis(250)).await;
 
-    let persisted_before_reconnect =
-        Storage::load_blockchain_from(recovering_directory.path())
-            .expect("recovering chain must remain readable before reconnect")
-            .expect("recovering chain must exist before reconnect");
+    let persisted_before_reconnect = Storage::load_blockchain_from(recovering_directory.path())
+        .expect("recovering chain must remain readable before reconnect")
+        .expect("recovering chain must exist before reconnect");
 
     assert_eq!(persisted_before_reconnect.len(), 1);
 
@@ -1139,8 +1094,7 @@ async fn runtime_retries_unavailable_peer_and_syncs_after_peer_comes_online() {
 
     wait_for_listener(&source_listen_address).await;
 
-    let synchronized_chain =
-        wait_for_persisted_chain(recovering_directory.path(), 2).await;
+    let synchronized_chain = wait_for_persisted_chain(recovering_directory.path(), 2).await;
 
     assert_eq!(synchronized_chain.len(), 2);
 
@@ -1151,10 +1105,12 @@ async fn runtime_retries_unavailable_peer_and_syncs_after_peer_comes_online() {
     assert_eq!(synchronized_tip.index, 1);
     assert_eq!(synchronized_tip.hash, produced.hash);
     assert_eq!(synchronized_tip.validator, selected_address);
-    assert!(synchronized_tip
-        .transactions
-        .iter()
-        .any(|stored| stored.id == transaction_id));
+    assert!(
+        synchronized_tip
+            .transactions
+            .iter()
+            .any(|stored| stored.id == transaction_id)
+    );
 
     let source_chain = Storage::load_blockchain_from(source_directory.path())
         .expect("source persisted chain must be readable")
@@ -1200,12 +1156,11 @@ async fn runtime_fails_over_to_a_healthy_peer_when_another_peer_is_unavailable()
         .address
         .clone();
 
-    let (producer_wallet, recipient_wallet) =
-        if selected_address == validator_a.address() {
-            (&validator_a, &validator_b)
-        } else {
-            (&validator_b, &validator_a)
-        };
+    let (producer_wallet, recipient_wallet) = if selected_address == validator_a.address() {
+        (&validator_a, &validator_b)
+    } else {
+        (&validator_b, &validator_a)
+    };
 
     let producer_address = producer_wallet.address().to_string();
     let recipient_address = recipient_wallet.address().to_string();
@@ -1231,11 +1186,8 @@ async fn runtime_fails_over_to_a_healthy_peer_when_another_peer_is_unavailable()
 
     let mut source_node = build_genesis_node(source_directory.path());
 
-    Storage::save_blockchain_to(
-        source_directory.path(),
-        &source_node.blockchain.chain,
-    )
-    .expect("source genesis must be persisted");
+    Storage::save_blockchain_to(source_directory.path(), &source_node.blockchain.chain)
+        .expect("source genesis must be persisted");
 
     let amount = 1u64;
     let fee = source_node.blockchain.economy.calculate_fee(amount);
@@ -1252,15 +1204,12 @@ async fn runtime_fails_over_to_a_healthy_peer_when_another_peer_is_unavailable()
 
     assert!(source_node.add_transaction(transaction));
 
-    let producer_identity = ValidatorIdentity::from_private_key(
-        &producer_wallet.private_key_hex(),
-        &consensus,
-    )
-    .expect("selected source validator must be authorized");
+    let producer_identity =
+        ValidatorIdentity::from_private_key(&producer_wallet.private_key_hex(), &consensus)
+            .expect("selected source validator must be authorized");
 
-    let mut source_runtime =
-        NodeRuntime::from_node(source_node, Some(producer_identity))
-            .expect("source runtime must initialize");
+    let mut source_runtime = NodeRuntime::from_node(source_node, Some(producer_identity))
+        .expect("source runtime must initialize");
 
     let produced = source_runtime
         .try_produce_block(GENESIS_TIMESTAMP + 1)
@@ -1270,20 +1219,15 @@ async fn runtime_fails_over_to_a_healthy_peer_when_another_peer_is_unavailable()
 
     let follower_node = build_genesis_node(follower_directory.path());
 
-    Storage::save_blockchain_to(
-        follower_directory.path(),
-        &follower_node.blockchain.chain,
-    )
-    .expect("follower genesis must be persisted");
+    Storage::save_blockchain_to(follower_directory.path(), &follower_node.blockchain.chain)
+        .expect("follower genesis must be persisted");
 
     assert_eq!(follower_node.blockchain.height(), 1);
 
-    let follower_runtime =
-        NodeRuntime::from_node(follower_node, None)
-            .expect("follower observer runtime must initialize");
+    let follower_runtime = NodeRuntime::from_node(follower_node, None)
+        .expect("follower observer runtime must initialize");
 
-    let (source_listen_address, follower_listen_address) =
-        two_free_loopback_addresses();
+    let (source_listen_address, follower_listen_address) = two_free_loopback_addresses();
     let unavailable_peer = free_loopback_address();
 
     let source_server_address = source_listen_address.clone();
@@ -1311,8 +1255,7 @@ async fn runtime_fails_over_to_a_healthy_peer_when_another_peer_is_unavailable()
 
     wait_for_listener(&follower_listen_address).await;
 
-    let synchronized_chain =
-        wait_for_persisted_chain(follower_directory.path(), 2).await;
+    let synchronized_chain = wait_for_persisted_chain(follower_directory.path(), 2).await;
 
     assert_eq!(synchronized_chain.len(), 2);
 
@@ -1323,10 +1266,12 @@ async fn runtime_fails_over_to_a_healthy_peer_when_another_peer_is_unavailable()
     assert_eq!(synchronized_tip.index, 1);
     assert_eq!(synchronized_tip.hash, produced.hash);
     assert_eq!(synchronized_tip.validator, selected_address);
-    assert!(synchronized_tip
-        .transactions
-        .iter()
-        .any(|stored| stored.id == transaction_id));
+    assert!(
+        synchronized_tip
+            .transactions
+            .iter()
+            .any(|stored| stored.id == transaction_id)
+    );
 
     let source_chain = Storage::load_blockchain_from(source_directory.path())
         .expect("source persisted chain must be readable")

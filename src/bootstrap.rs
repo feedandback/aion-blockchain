@@ -105,7 +105,7 @@ fn canonical_genesis_configuration() -> GenesisConfiguration {
 
 fn build_bootstrap(configuration: GenesisConfiguration) -> Result<CanonicalBootstrap, String> {
     if configuration.fee_divisor == 0 {
-        return Err("Canonical transaction fee divisor sıfır olamaz".into());
+        return Err("Canonical transaction fee divisor cannot be zero".into());
     }
 
     let configured_fee_percent = configuration
@@ -113,10 +113,10 @@ fn build_bootstrap(configuration: GenesisConfiguration) -> Result<CanonicalBoots
         .checked_add(configuration.liquidity_fee_percent)
         .and_then(|total| total.checked_add(configuration.treasury_fee_percent))
         .and_then(|total| total.checked_add(configuration.burn_fee_percent))
-        .ok_or("Canonical fee yüzdeleri overflow")?;
+        .ok_or("Canonical fee percentages overflow")?;
 
     if configured_fee_percent != 100 {
-        return Err("Canonical fee yüzdeleri geçersiz".into());
+        return Err("Canonical fee percentages are invalid".into());
     }
 
     let allocated_supply =
@@ -130,20 +130,20 @@ fn build_bootstrap(configuration: GenesisConfiguration) -> Result<CanonicalBoots
             })?;
 
     if allocated_supply != configuration.genesis_supply {
-        return Err("Canonical genesis allocation toplam arza eşit değil".into());
+        return Err("Canonical genesis allocation does not equal the total supply".into());
     }
 
     let mut consensus = Consensus::new();
     for validator in &configuration.validators {
         if !consensus.add_validator(validator.address.clone(), validator.stake) {
-            return Err("Canonical genesis validator eklenemedi".into());
+            return Err("Canonical genesis validator could not be added".into());
         }
     }
 
     let mut state = State::new();
     for allocation in &configuration.allocations {
         if state.accounts.contains_key(&allocation.address) {
-            return Err("Canonical genesis allocation adresi tekrar ediyor".into());
+            return Err("Canonical genesis allocation address is duplicated".into());
         }
 
         state.create_account(allocation.address.clone(), allocation.balance);
@@ -186,14 +186,14 @@ fn genesis_block(configuration: &GenesisConfiguration, fingerprint: &str) -> Blo
 }
 
 fn append_string(buffer: &mut Vec<u8>, value: &str) -> Result<(), String> {
-    let length = u64::try_from(value.len()).map_err(|_| "Genesis string uzunluğu overflow")?;
+    let length = u64::try_from(value.len()).map_err(|_| "Genesis string length overflow")?;
     buffer.extend_from_slice(&length.to_be_bytes());
     buffer.extend_from_slice(value.as_bytes());
     Ok(())
 }
 
 fn append_count(buffer: &mut Vec<u8>, count: usize) -> Result<(), String> {
-    let count = u64::try_from(count).map_err(|_| "Genesis liste uzunluğu overflow")?;
+    let count = u64::try_from(count).map_err(|_| "Genesis list length overflow")?;
     buffer.extend_from_slice(&count.to_be_bytes());
     Ok(())
 }
@@ -245,9 +245,17 @@ fn genesis_configuration_fingerprint(
 }
 
 #[cfg(test)]
+type GenesisIdentity = (String, String);
+
+#[cfg(test)]
+type GenesisIdentityVariant = (&'static str, String, String);
+
+#[cfg(test)]
+type GenesisIdentityTestVectors = (GenesisIdentity, Vec<GenesisIdentityVariant>);
+
+#[cfg(test)]
 #[allow(dead_code)]
-pub(crate) fn genesis_identity_test_vectors()
--> Result<((String, String), Vec<(&'static str, String, String)>), String> {
+pub(crate) fn genesis_identity_test_vectors() -> Result<GenesisIdentityTestVectors, String> {
     fn identity(configuration: &GenesisConfiguration) -> Result<(String, String), String> {
         let fingerprint = genesis_configuration_fingerprint(configuration)?;
         let hash = genesis_block(configuration, &fingerprint).hash;

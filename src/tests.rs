@@ -56,9 +56,12 @@ fn committed_configuration_changes_alter_fingerprint_and_genesis_hash() {
     for (field, fingerprint, hash) in variants {
         assert_ne!(
             fingerprint, baseline_fingerprint,
-            "{field} fingerprint'e bağlı değil"
+            "{field} is not bound to the fingerprint"
         );
-        assert_ne!(hash, baseline_hash, "{field} genesis hash'e bağlı değil");
+        assert_ne!(
+            hash, baseline_hash,
+            "{field} is not bound to the genesis hash"
+        );
     }
 }
 
@@ -114,8 +117,7 @@ fn node_and_valid_block() -> (Node, Block, String, String, String, u64) {
         )
         .expect("fixture block must be produced");
 
-    let producer_liquidity_reserve =
-        producer_blockchain.economy.liquidity_reserve();
+    let producer_liquidity_reserve = producer_blockchain.economy.liquidity_reserve();
 
     let mut receiver_blockchain = Blockchain::new(genesis);
     receiver_blockchain
@@ -139,8 +141,7 @@ fn node_and_valid_block() -> (Node, Block, String, String, String, u64) {
 }
 
 fn node_and_coinbase_only_block() -> (Node, Block, String) {
-    let (node, valid_block, _, _, validator_address, _) =
-        node_and_valid_block();
+    let (node, valid_block, _, _, validator_address, _) = node_and_valid_block();
     let validator = wallet("03");
     let coinbase = valid_block
         .transactions
@@ -255,8 +256,7 @@ fn node_rejects_a_self_consistent_tampered_coinbase_only_block() {
 
 #[test]
 fn rejected_coinbase_only_block_does_not_change_reward_or_supply() {
-    let (mut node, block, validator_address) =
-        node_and_coinbase_only_block();
+    let (mut node, block, validator_address) = node_and_coinbase_only_block();
     let original_height = node.blockchain.height();
     let original_supply = node.blockchain.economy.supply();
     let original_validator_balance = node.state.balance_of(&validator_address);
@@ -289,7 +289,6 @@ fn node_accepts_a_valid_block_without_persisting_it() {
     assert_eq!(producer_liquidity_reserve, 8);
     assert_eq!(accepted_blockchain.economy.liquidity_reserve(), 8);
 }
-
 
 #[test]
 fn network_block_duplicate_is_idempotent_for_chain_state_economy_and_mempool() {
@@ -339,10 +338,7 @@ fn network_block_duplicate_is_idempotent_for_chain_state_economy_and_mempool() {
     assert_eq!(node.state.treasury(), 0);
     assert_eq!(node.state.burned(), 0);
     assert_eq!(node.mempool.transactions.len(), 1);
-    assert_eq!(
-        node.mempool.transactions[0].id,
-        sentinel_transaction_id
-    );
+    assert_eq!(node.mempool.transactions[0].id, sentinel_transaction_id);
 
     let accepted_chain_hashes = node
         .blockchain

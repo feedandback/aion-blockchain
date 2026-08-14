@@ -1,8 +1,5 @@
 use kybernetes::network::{
-    Network,
-    NetworkMessage,
-    ONE_SHOT_CLIENT_LISTEN_ADDRESS,
-    PeerRegistrationOutcome,
+    Network, NetworkMessage, ONE_SHOT_CLIENT_LISTEN_ADDRESS, PeerRegistrationOutcome,
 };
 use kybernetes::protocol::{MAX_HANDSHAKE_AGE_SECONDS, NETWORK_ID, NETWORK_PROTOCOL_VERSION};
 use kybernetes::wallet::Wallet;
@@ -87,9 +84,7 @@ fn authenticated_one_shot_client_does_not_consume_a_peer_slot() {
     let mut network = Network::new();
 
     assert!(Network::validate_handshake(&message));
-    assert!(!network.add_peer(
-        ONE_SHOT_CLIENT_LISTEN_ADDRESS.to_string()
-    ));
+    assert!(!network.add_peer(ONE_SHOT_CLIENT_LISTEN_ADDRESS.to_string()));
     network.receive(message);
 
     assert_eq!(network.peer_count(), 0);
@@ -103,10 +98,7 @@ fn authenticated_one_shot_client_does_not_consume_a_peer_slot() {
         PeerRegistrationOutcome::OneShotClient
     );
     assert_eq!(
-        network.register_peer_identity(
-            wallet.node_id().to_string(),
-            LISTEN_ADDRESS.to_string(),
-        ),
+        network.register_peer_identity(wallet.node_id().to_string(), LISTEN_ADDRESS.to_string(),),
         PeerRegistrationOutcome::Registered
     );
     assert_eq!(network.peer_count(), 1);
@@ -172,15 +164,10 @@ fn network_classifies_an_existing_peer_as_duplicate() {
         &"56".repeat(32),
     );
     assert!(Network::validate_handshake(&reconnect));
-    let duplicate = network.register_peer_identity(
-        wallet.node_id().to_string(),
-        LISTEN_ADDRESS.to_string(),
-    );
+    let duplicate =
+        network.register_peer_identity(wallet.node_id().to_string(), LISTEN_ADDRESS.to_string());
 
-    assert_eq!(
-        duplicate,
-        PeerRegistrationOutcome::AlreadyRegistered
-    );
+    assert_eq!(duplicate, PeerRegistrationOutcome::AlreadyRegistered);
     assert_eq!(network.peer_count(), 1);
     assert_eq!(network.identified_peer_count(), 1);
     assert_eq!(network.message_count(), 1);

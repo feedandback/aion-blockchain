@@ -3,47 +3,22 @@ pub mod tcp;
 pub const ONE_SHOT_CLIENT_LISTEN_ADDRESS: &str = "127.0.0.1:0";
 const MAX_TRANSACTION_ACK_REASON_LENGTH: usize = 512;
 
-use std::time::{
-    SystemTime,
-    UNIX_EPOCH,
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use rand_core::{
-    OsRng,
-    RngCore,
-};
-use serde::{
-    Deserialize,
-    Serialize,
-};
+use rand_core::{OsRng, RngCore};
+use serde::{Deserialize, Serialize};
 
-use crate::core::{
-    Block,
-    Transaction,
+use crate::core::{Block, Transaction};
+use crate::protocol::{
+    ADDRESS_HEX_LENGTH, HASH_HEX_LENGTH, MAX_HANDSHAKE_AGE_SECONDS, MAX_NETWORK_INBOX_MESSAGES,
+    MAX_NETWORK_MESSAGE_BYTES, MAX_NETWORK_MESSAGE_HISTORY, MAX_NETWORK_PEERS,
+    MAX_PEER_ADDRESS_LENGTH, MAX_SYNC_BLOCKS_PER_MESSAGE, NETWORK_ID, NETWORK_PROTOCOL_VERSION,
+    is_fixed_hex,
 };
 use crate::wallet::Wallet;
-use crate::protocol::{
-    is_fixed_hex,
-    ADDRESS_HEX_LENGTH,
-    HASH_HEX_LENGTH,
-    MAX_NETWORK_INBOX_MESSAGES,
-    MAX_NETWORK_MESSAGE_BYTES,
-    MAX_HANDSHAKE_AGE_SECONDS,
-    MAX_NETWORK_MESSAGE_HISTORY,
-    MAX_NETWORK_PEERS,
-    MAX_PEER_ADDRESS_LENGTH,
-    MAX_SYNC_BLOCKS_PER_MESSAGE,
-    NETWORK_ID,
-    NETWORK_PROTOCOL_VERSION,
-};
 
 #[allow(dead_code)]
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkMessage {
     Handshake {
         node_id: String,
@@ -90,22 +65,13 @@ pub enum NetworkMessage {
     },
 }
 
-#[derive(
-    Debug,
-    Clone,
-)]
+#[derive(Debug, Clone)]
 pub struct PeerIdentity {
     pub node_id: String,
     pub listen_address: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PeerRegistrationOutcome {
     Registered,
     AlreadyRegistered,
@@ -120,14 +86,11 @@ pub enum PeerRegistrationOutcome {
 pub struct Network {
     pub peers: Vec<String>,
 
-    pub peer_identities:
-        Vec<PeerIdentity>,
+    pub peer_identities: Vec<PeerIdentity>,
 
-    pub messages:
-        Vec<NetworkMessage>,
+    pub messages: Vec<NetworkMessage>,
 
-    pub inbox:
-        Vec<NetworkMessage>,
+    pub inbox: Vec<NetworkMessage>,
 }
 
 #[allow(dead_code)]
@@ -136,8 +99,7 @@ impl Network {
         Self {
             peers: Vec::new(),
 
-            peer_identities:
-                Vec::new(),
+            peer_identities: Vec::new(),
 
             messages: Vec::new(),
 
@@ -145,100 +107,62 @@ impl Network {
         }
     }
 
-    pub fn current_timestamp(
-    ) -> u64 {
+    pub fn current_timestamp() -> u64 {
         SystemTime::now()
-            .duration_since(
-                UNIX_EPOCH,
-            )
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
     }
 
-    fn handshake_timestamp_valid(
-        timestamp: u64,
-    ) -> bool {
-        let now =
-            Self::current_timestamp();
+    fn handshake_timestamp_valid(timestamp: u64) -> bool {
+        let now = Self::current_timestamp();
 
-        now.abs_diff(
-            timestamp,
-        ) <= MAX_HANDSHAKE_AGE_SECONDS
+        now.abs_diff(timestamp) <= MAX_HANDSHAKE_AGE_SECONDS
     }
 
-    pub fn generate_handshake_challenge(
-    ) -> String {
-        let mut bytes =
-            [0u8; 32];
+    pub fn generate_handshake_challenge() -> String {
+        let mut bytes = [0u8; 32];
 
-        OsRng.fill_bytes(
-            &mut bytes,
-        );
+        OsRng.fill_bytes(&mut bytes);
 
-        hex::encode(
-            bytes,
-        )
+        hex::encode(bytes)
     }
 
-    pub fn handshake_challenge(
-        message: &NetworkMessage,
-    ) -> Option<&str> {
+    pub fn handshake_challenge(message: &NetworkMessage) -> Option<&str> {
         match message {
-            NetworkMessage::Handshake {
-                challenge,
-                ..
-            } => {
-                Some(
-                    challenge,
-                )
-            }
+            NetworkMessage::Handshake { challenge, .. } => Some(challenge),
 
             _ => None,
         }
     }
 
-    pub fn protocol_version(
-    ) -> u32 {
+    pub fn protocol_version() -> u32 {
         NETWORK_PROTOCOL_VERSION
     }
 
-    pub fn create_handshake(
-        wallet: &Wallet,
-        listen_address: String,
-    ) -> NetworkMessage {
-        let node_id =
-            wallet
-                .node_id()
-                .to_string();
+    pub fn create_handshake(wallet: &Wallet, listen_address: String) -> NetworkMessage {
+        let node_id = wallet.node_id().to_string();
 
-        let public_key =
-            wallet
-                .public_key_hex();
+        let public_key = wallet.public_key_hex();
 
-        let timestamp =
-            Self::current_timestamp();
+        let timestamp = Self::current_timestamp();
 
-        let challenge =
-            Self::generate_handshake_challenge();
+        let challenge = Self::generate_handshake_challenge();
 
-        let signature =
-            wallet
-                .sign_node_handshake(
-                    &listen_address,
-                    NETWORK_ID,
-                    NETWORK_PROTOCOL_VERSION,
-                    timestamp,
-                    &challenge,
-                );
+        let signature = wallet.sign_node_handshake(
+            &listen_address,
+            NETWORK_ID,
+            NETWORK_PROTOCOL_VERSION,
+            timestamp,
+            &challenge,
+        );
 
         NetworkMessage::Handshake {
             node_id,
             public_key,
             listen_address,
-            network_id:
-                NETWORK_ID.to_string(),
-            protocol_version:
-                NETWORK_PROTOCOL_VERSION,
+            network_id: NETWORK_ID.to_string(),
+            protocol_version: NETWORK_PROTOCOL_VERSION,
             timestamp,
             challenge,
             signature,
@@ -250,35 +174,25 @@ impl Network {
         accepted: bool,
         challenge: String,
     ) -> NetworkMessage {
-        let node_id =
-            wallet
-                .node_id()
-                .to_string();
+        let node_id = wallet.node_id().to_string();
 
-        let public_key =
-            wallet
-                .public_key_hex();
+        let public_key = wallet.public_key_hex();
 
-        let timestamp =
-            Self::current_timestamp();
+        let timestamp = Self::current_timestamp();
 
-        let signature =
-            wallet
-                .sign_node_handshake_ack(
-                    NETWORK_ID,
-                    NETWORK_PROTOCOL_VERSION,
-                    timestamp,
-                    &challenge,
-                    accepted,
-                );
+        let signature = wallet.sign_node_handshake_ack(
+            NETWORK_ID,
+            NETWORK_PROTOCOL_VERSION,
+            timestamp,
+            &challenge,
+            accepted,
+        );
 
         NetworkMessage::HandshakeAck {
             node_id,
             public_key,
-            network_id:
-                NETWORK_ID.to_string(),
-            protocol_version:
-                NETWORK_PROTOCOL_VERSION,
+            network_id: NETWORK_ID.to_string(),
+            protocol_version: NETWORK_PROTOCOL_VERSION,
             timestamp,
             challenge,
             accepted,
@@ -286,10 +200,7 @@ impl Network {
         }
     }
 
-    pub fn validate_handshake_ack(
-        message: &NetworkMessage,
-        expected_challenge: &str,
-    ) -> bool {
+    pub fn validate_handshake_ack(message: &NetworkMessage, expected_challenge: &str) -> bool {
         match message {
             NetworkMessage::HandshakeAck {
                 node_id,
@@ -302,16 +213,9 @@ impl Network {
                 signature,
             } => {
                 *accepted
-                    && challenge
-                        == expected_challenge
-                    && Self::handshake_ack_fields_valid(
-                        node_id,
-                        network_id,
-                        *protocol_version,
-                    )
-                    && Self::handshake_timestamp_valid(
-                        *timestamp,
-                    )
+                    && challenge == expected_challenge
+                    && Self::handshake_ack_fields_valid(node_id, network_id, *protocol_version)
+                    && Self::handshake_timestamp_valid(*timestamp)
                     && Wallet::verify_node_handshake_ack(
                         node_id,
                         public_key,
@@ -328,32 +232,24 @@ impl Network {
         }
     }
 
-    fn push_message_history(
-        &mut self,
-        message: NetworkMessage,
-    ) {
-        if self.messages.len()
-            >= MAX_NETWORK_MESSAGE_HISTORY
-        {
+    fn push_message_history(&mut self, message: NetworkMessage) {
+        if self.messages.len() >= MAX_NETWORK_MESSAGE_HISTORY {
             self.messages.remove(0);
         }
 
         self.messages.push(message);
     }
 
-    fn push_inbox(
-        &mut self,
-        message: NetworkMessage,
-    ) {
-        if self.inbox.len()
-            >= MAX_NETWORK_INBOX_MESSAGES
-        {
+    fn push_inbox(&mut self, message: NetworkMessage) {
+        if self.inbox.len() >= MAX_NETWORK_INBOX_MESSAGES {
             self.inbox.remove(0);
         }
 
         self.inbox.push(message);
     }
 
+    // This validator intentionally mirrors all signed handshake fields one-to-one.
+    #[allow(clippy::too_many_arguments)]
     fn handshake_fields_valid(
         node_id: &str,
         public_key: &str,
@@ -364,28 +260,14 @@ impl Network {
         challenge: &str,
         signature: &str,
     ) -> bool {
-        is_fixed_hex(
-            node_id,
-            ADDRESS_HEX_LENGTH,
-        )
-            && is_fixed_hex(
-                public_key,
-                ADDRESS_HEX_LENGTH,
-            )
+        is_fixed_hex(node_id, ADDRESS_HEX_LENGTH)
+            && is_fixed_hex(public_key, ADDRESS_HEX_LENGTH)
             && !listen_address.is_empty()
-            && listen_address.len()
-                <= MAX_PEER_ADDRESS_LENGTH
-            && network_id
-                == NETWORK_ID
-            && protocol_version
-                == NETWORK_PROTOCOL_VERSION
-            && Self::handshake_timestamp_valid(
-                timestamp,
-            )
-            && is_fixed_hex(
-                challenge,
-                64,
-            )
+            && listen_address.len() <= MAX_PEER_ADDRESS_LENGTH
+            && network_id == NETWORK_ID
+            && protocol_version == NETWORK_PROTOCOL_VERSION
+            && Self::handshake_timestamp_valid(timestamp)
+            && is_fixed_hex(challenge, 64)
             && Wallet::verify_node_handshake(
                 node_id,
                 public_key,
@@ -398,19 +280,10 @@ impl Network {
             )
     }
 
-    fn handshake_ack_fields_valid(
-        node_id: &str,
-        network_id: &str,
-        protocol_version: u32,
-    ) -> bool {
-        is_fixed_hex(
-            node_id,
-            ADDRESS_HEX_LENGTH,
-        )
-            && network_id
-                == NETWORK_ID
-            && protocol_version
-                == NETWORK_PROTOCOL_VERSION
+    fn handshake_ack_fields_valid(node_id: &str, network_id: &str, protocol_version: u32) -> bool {
+        is_fixed_hex(node_id, ADDRESS_HEX_LENGTH)
+            && network_id == NETWORK_ID
+            && protocol_version == NETWORK_PROTOCOL_VERSION
     }
 
     fn transaction_ack_fields_valid(
@@ -418,10 +291,7 @@ impl Network {
         accepted: bool,
         reason: &Option<String>,
     ) -> bool {
-        if !is_fixed_hex(
-            transaction_id,
-            HASH_HEX_LENGTH,
-        ) {
+        if !is_fixed_hex(transaction_id, HASH_HEX_LENGTH) {
             return false;
         }
 
@@ -429,28 +299,16 @@ impl Network {
             (true, None) => true,
 
             (false, Some(reason)) => {
-                !reason.is_empty()
-                    && reason.len()
-                        <= MAX_TRANSACTION_ACK_REASON_LENGTH
+                !reason.is_empty() && reason.len() <= MAX_TRANSACTION_ACK_REASON_LENGTH
             }
 
             _ => false,
         }
     }
 
-    fn message_within_limits(
-        message: &NetworkMessage,
-    ) -> bool {
-        let serialized_size_ok =
-            serde_json::to_vec(
-                message,
-            )
-            .map(
-                |bytes| {
-                    bytes.len()
-                        <= MAX_NETWORK_MESSAGE_BYTES
-                },
-            )
+    fn message_within_limits(message: &NetworkMessage) -> bool {
+        let serialized_size_ok = serde_json::to_vec(message)
+            .map(|bytes| bytes.len() <= MAX_NETWORK_MESSAGE_BYTES)
             .unwrap_or(false);
 
         if !serialized_size_ok {
@@ -467,18 +325,16 @@ impl Network {
                 timestamp,
                 challenge,
                 signature,
-            } => {
-                Self::handshake_fields_valid(
-                    node_id,
-                    public_key,
-                    listen_address,
-                    network_id,
-                    *protocol_version,
-                    *timestamp,
-                    challenge,
-                    signature,
-                )
-            }
+            } => Self::handshake_fields_valid(
+                node_id,
+                public_key,
+                listen_address,
+                network_id,
+                *protocol_version,
+                *timestamp,
+                challenge,
+                signature,
+            ),
 
             NetworkMessage::HandshakeAck {
                 node_id,
@@ -487,56 +343,28 @@ impl Network {
                 challenge,
                 ..
             } => {
-                Self::handshake_ack_fields_valid(
-                    node_id,
-                    network_id,
-                    *protocol_version,
-                )
-                    && is_fixed_hex(
-                        challenge,
-                        64,
-                    )
+                Self::handshake_ack_fields_valid(node_id, network_id, *protocol_version)
+                    && is_fixed_hex(challenge, 64)
             }
 
             NetworkMessage::TransactionAck {
                 transaction_id,
                 accepted,
                 reason,
-            } => {
-                Self::transaction_ack_fields_valid(
-                    transaction_id,
-                    *accepted,
-                    reason,
-                )
+            } => Self::transaction_ack_fields_valid(transaction_id, *accepted, reason),
+
+            NetworkMessage::ChainChunkResponse { blocks, .. } => {
+                blocks.len() <= MAX_SYNC_BLOCKS_PER_MESSAGE
             }
 
-            NetworkMessage::ChainChunkResponse {
-                blocks,
-                ..
-            } => {
-                blocks.len()
-                    <= MAX_SYNC_BLOCKS_PER_MESSAGE
-            }
-
-            NetworkMessage::ChainChunkRequest {
-                ..
-            } => true,
+            NetworkMessage::ChainChunkRequest { .. } => true,
 
             _ => true,
         }
     }
 
-    pub fn validate_handshake(
-        message: &NetworkMessage,
-    ) -> bool {
-        matches!(
-            message,
-            NetworkMessage::Handshake {
-                ..
-            }
-        ) && Self::message_within_limits(
-            message,
-        )
+    pub fn validate_handshake(message: &NetworkMessage) -> bool {
+        matches!(message, NetworkMessage::Handshake { .. }) && Self::message_within_limits(message)
     }
 
     pub fn validate_transaction_ack(
@@ -550,14 +378,10 @@ impl Network {
                 ..
             } if transaction_id
                 == expected_transaction_id
-        ) && Self::message_within_limits(
-            message,
-        )
+        ) && Self::message_within_limits(message)
     }
 
-    fn print_message_summary(
-        message: &NetworkMessage,
-    ) {
+    fn print_message_summary(message: &NetworkMessage) {
         match message {
             NetworkMessage::Handshake {
                 node_id,
@@ -567,11 +391,8 @@ impl Network {
                 ..
             } => {
                 println!(
-                    "📡 Network mesajı yayınlandı: Handshake node={} address={} network={} protocol={}",
-                    node_id,
-                    listen_address,
-                    network_id,
-                    protocol_version
+                    "Network message broadcast: Handshake node={} address={} network={} protocol={}",
+                    node_id, listen_address, network_id, protocol_version
                 );
             }
 
@@ -583,21 +404,13 @@ impl Network {
                 ..
             } => {
                 println!(
-                    "📡 Network mesajı yayınlandı: HandshakeAck node={} network={} protocol={} accepted={}",
-                    node_id,
-                    network_id,
-                    protocol_version,
-                    accepted
+                    "Network message broadcast: HandshakeAck node={} network={} protocol={} accepted={}",
+                    node_id, network_id, protocol_version, accepted
                 );
             }
 
-            NetworkMessage::Transaction(
-                transaction,
-            ) => {
-                println!(
-                    "📡 Network mesajı yayınlandı: Transaction {}",
-                    transaction.id
-                );
+            NetworkMessage::Transaction(transaction) => {
+                println!("Network message broadcast: Transaction {}", transaction.id);
             }
 
             NetworkMessage::TransactionAck {
@@ -606,32 +419,22 @@ impl Network {
                 ..
             } => {
                 println!(
-                    "📡 Network mesajı yayınlandı: TransactionAck {} accepted={}",
-                    transaction_id,
-                    accepted
+                    "Network message broadcast: TransactionAck {} accepted={}",
+                    transaction_id, accepted
                 );
             }
 
-            NetworkMessage::Block(
-                block,
-            ) => {
-                println!(
-                    "📡 Network mesajı yayınlandı: Block {}",
-                    block.index
-                );
+            NetworkMessage::Block(block) => {
+                println!("Network message broadcast: Block {}", block.index);
             }
 
             NetworkMessage::SyncRequest => {
-                println!(
-                    "📡 Network mesajı yayınlandı: SyncRequest"
-                );
+                println!("Network message broadcast: SyncRequest");
             }
 
-            NetworkMessage::ChainChunkRequest {
-                start_index,
-            } => {
+            NetworkMessage::ChainChunkRequest { start_index } => {
                 println!(
-                    "📡 Network mesajı yayınlandı: ChainChunkRequest (start: {})",
+                    "Network message broadcast: ChainChunkRequest (start: {})",
                     start_index
                 );
             }
@@ -642,7 +445,7 @@ impl Network {
                 blocks,
             } => {
                 println!(
-                    "📡 Network mesajı yayınlandı: ChainChunkResponse (start: {}, chunk: {}, total: {})",
+                    "Network message broadcast: ChainChunkResponse (start: {}, chunk: {}, total: {})",
                     start_index,
                     blocks.len(),
                     total_blocks
@@ -651,28 +454,19 @@ impl Network {
         }
     }
 
-    pub fn add_peer(
-        &mut self,
-        address: String,
-    ) -> bool {
+    pub fn add_peer(&mut self, address: String) -> bool {
         if address.is_empty()
-            || address
-                == ONE_SHOT_CLIENT_LISTEN_ADDRESS
-            || address.len()
-                > MAX_PEER_ADDRESS_LENGTH
+            || address == ONE_SHOT_CLIENT_LISTEN_ADDRESS
+            || address.len() > MAX_PEER_ADDRESS_LENGTH
         {
             return false;
         }
 
-        if self.peers.len()
-            >= MAX_NETWORK_PEERS
-        {
+        if self.peers.len() >= MAX_NETWORK_PEERS {
             return false;
         }
 
-        if self.peers.contains(
-            &address,
-        ) {
+        if self.peers.contains(&address) {
             return false;
         }
 
@@ -681,16 +475,9 @@ impl Network {
         true
     }
 
-    pub fn add_peer_identity(
-        &mut self,
-        node_id: String,
-        listen_address: String,
-    ) -> bool {
+    pub fn add_peer_identity(&mut self, node_id: String, listen_address: String) -> bool {
         matches!(
-            self.register_peer_identity(
-                node_id,
-                listen_address,
-            ),
+            self.register_peer_identity(node_id, listen_address,),
             PeerRegistrationOutcome::Registered
         )
     }
@@ -700,34 +487,21 @@ impl Network {
         node_id: String,
         listen_address: String,
     ) -> PeerRegistrationOutcome {
-        if !is_fixed_hex(
-            &node_id,
-            ADDRESS_HEX_LENGTH,
-        )
+        if !is_fixed_hex(&node_id, ADDRESS_HEX_LENGTH)
             || listen_address.is_empty()
-            || listen_address.len()
-                > MAX_PEER_ADDRESS_LENGTH
+            || listen_address.len() > MAX_PEER_ADDRESS_LENGTH
         {
             return PeerRegistrationOutcome::InvalidIdentity;
         }
 
-        if listen_address
-            == ONE_SHOT_CLIENT_LISTEN_ADDRESS
-        {
+        if listen_address == ONE_SHOT_CLIENT_LISTEN_ADDRESS {
             return PeerRegistrationOutcome::OneShotClient;
         }
 
         if self
             .peer_identities
             .iter()
-            .any(
-                |peer| {
-                    peer.node_id
-                        == node_id
-                        && peer.listen_address
-                            == listen_address
-                },
-            )
+            .any(|peer| peer.node_id == node_id && peer.listen_address == listen_address)
         {
             return PeerRegistrationOutcome::AlreadyRegistered;
         }
@@ -735,12 +509,7 @@ impl Network {
         if self
             .peer_identities
             .iter()
-            .any(
-                |peer| {
-                    peer.node_id
-                        == node_id
-                },
-            )
+            .any(|peer| peer.node_id == node_id)
         {
             return PeerRegistrationOutcome::NodeIdConflict;
         }
@@ -748,69 +517,41 @@ impl Network {
         if self
             .peer_identities
             .iter()
-            .any(
-                |peer| {
-                    peer.listen_address
-                        == listen_address
-                },
-            )
+            .any(|peer| peer.listen_address == listen_address)
         {
             return PeerRegistrationOutcome::ListenAddressConflict;
         }
 
-        if self.peer_identities.len()
-            >= MAX_NETWORK_PEERS
-            || (!self.peers.contains(
-                &listen_address,
-            ) && self.peers.len()
-                >= MAX_NETWORK_PEERS)
+        if self.peer_identities.len() >= MAX_NETWORK_PEERS
+            || (!self.peers.contains(&listen_address) && self.peers.len() >= MAX_NETWORK_PEERS)
         {
             return PeerRegistrationOutcome::PeerLimitReached;
         }
 
-        if !self.peers.contains(
-            &listen_address,
-        ) {
-            self.peers.push(
-                listen_address.clone(),
-            );
+        if !self.peers.contains(&listen_address) {
+            self.peers.push(listen_address.clone());
         }
 
-        self.peer_identities.push(
-            PeerIdentity {
-                node_id,
-                listen_address,
-            },
-        );
+        self.peer_identities.push(PeerIdentity {
+            node_id,
+            listen_address,
+        });
 
         PeerRegistrationOutcome::Registered
     }
 
-    pub fn has_peer_node_id(
-        &self,
-        node_id: &str,
-    ) -> bool {
+    pub fn has_peer_node_id(&self, node_id: &str) -> bool {
         self.peer_identities
             .iter()
-            .any(
-                |peer| {
-                    peer.node_id
-                        == node_id
-                },
-            )
+            .any(|peer| peer.node_id == node_id)
     }
 
-    pub fn peer_count(
-        &self,
-    ) -> usize {
+    pub fn peer_count(&self) -> usize {
         self.peers.len()
     }
 
-    pub fn identified_peer_count(
-        &self,
-    ) -> usize {
-        self.peer_identities
-            .len()
+    pub fn identified_peer_count(&self) -> usize {
+        self.peer_identities.len()
     }
 
     pub async fn broadcast_to_peers(
@@ -818,107 +559,60 @@ impl Network {
         wallet: &Wallet,
         listen_address: &str,
         message: NetworkMessage,
-    ) -> (
-        usize,
-        usize,
-    ) {
-        if !Self::message_within_limits(
-            &message,
-        ) {
-            println!(
-                "❌ Network mesajı reddedildi: Mesaj boyutu veya protokol limiti aşıldı"
-            );
+    ) -> (usize, usize) {
+        if !Self::message_within_limits(&message) {
+            println!("Network message rejected: message size or protocol limit exceeded");
 
-            return (
-                0,
-                0,
-            );
+            return (0, 0);
         }
 
-        Self::print_message_summary(
+        Self::print_message_summary(&message);
+
+        let peer_addresses = self.peers.clone();
+
+        println!("Actual P2P broadcast peer count: {}", peer_addresses.len());
+
+        let result = tcp::TcpTransport::broadcast_authenticated(
+            &peer_addresses,
+            wallet,
+            listen_address,
             &message,
-        );
+        )
+        .await;
 
-        let peer_addresses =
-            self.peers.clone();
+        self.push_message_history(message.clone());
 
-        println!(
-            "Gerçek P2P broadcast peer sayısı: {}",
-            peer_addresses.len()
-        );
-
-        let result =
-            tcp::TcpTransport::broadcast_authenticated(
-                &peer_addresses,
-                wallet,
-                listen_address,
-                &message,
-            )
-            .await;
-
-        self.push_message_history(
-            message.clone(),
-        );
-
-        self.push_inbox(
-            message,
-        );
+        self.push_inbox(message);
 
         result
     }
 
-    pub fn broadcast(
-        &mut self,
-        message: NetworkMessage,
-    ) {
+    pub fn broadcast(&mut self, message: NetworkMessage) {
         println!();
 
-        if !Self::message_within_limits(
-            &message,
-        ) {
-            println!(
-                "❌ Network mesajı reddedildi: Mesaj boyutu veya protokol limiti aşıldı"
-            );
+        if !Self::message_within_limits(&message) {
+            println!("Network message rejected: message size or protocol limit exceeded");
 
             return;
         }
 
-        Self::print_message_summary(
-            &message,
-        );
+        Self::print_message_summary(&message);
 
-        println!(
-            "Bağlı node sayısı: {}",
-            self.peers.len()
-        );
+        println!("Connected node count: {}", self.peers.len());
 
-        self.push_message_history(
-            message.clone(),
-        );
+        self.push_message_history(message.clone());
 
         self.push_inbox(message);
     }
 
-    pub fn receive(
-        &mut self,
-        message: NetworkMessage,
-    ) {
-        if !Self::message_within_limits(
-            &message,
-        ) {
-            if matches!(
-                &message,
-                NetworkMessage::Handshake {
-                    ..
-                }
-            ) {
+    pub fn receive(&mut self, message: NetworkMessage) {
+        if !Self::message_within_limits(&message) {
+            if matches!(&message, NetworkMessage::Handshake { .. }) {
                 println!(
-                    "❌ Handshake reddedildi: alan, imza, network, protocol veya timestamp geçersiz"
+                    "Handshake rejected: fields, signature, network, protocol, or timestamp are invalid"
                 );
             } else {
-                println!(
-                    "❌ Network mesajı reddedildi: Mesaj boyutu veya protokol limiti aşıldı"
-                );
+                println!("Network message rejected: message size or protocol limit exceeded");
             }
 
             return;
@@ -933,61 +627,49 @@ impl Network {
                 ..
             } => {
                 let registration =
-                    self.register_peer_identity(
-                        node_id.clone(),
-                        listen_address.clone(),
-                    );
+                    self.register_peer_identity(node_id.clone(), listen_address.clone());
 
                 match registration {
                     PeerRegistrationOutcome::Registered => {
                         println!(
-                            "📥 Handshake alındı. Node: {} Network: {} Protocol: {} Peer kaydedildi",
-                            node_id,
-                            network_id,
-                            protocol_version
+                            "Handshake received. Node: {} Network: {} Protocol: {} Peer registered",
+                            node_id, network_id, protocol_version
                         );
                     }
 
                     PeerRegistrationOutcome::AlreadyRegistered => {
                         println!(
-                            "📥 Handshake alındı. Node: {} Network: {} Protocol: {} Peer zaten kayıtlı",
-                            node_id,
-                            network_id,
-                            protocol_version
+                            "Handshake received. Node: {} Network: {} Protocol: {} Peer already registered",
+                            node_id, network_id, protocol_version
                         );
                     }
 
                     PeerRegistrationOutcome::OneShotClient => {
-                        println!(
-                            "📥 Authenticated one-shot client; peer registry kaydı oluşturulmadı"
-                        );
+                        println!("Authenticated one-shot client; no peer registry entry created");
                     }
 
                     PeerRegistrationOutcome::NodeIdConflict => {
                         println!(
-                            "❌ Peer kaydı reddedildi: node kimliği farklı listen address ile kayıtlı"
+                            "Peer registration rejected: node identity is already registered with a different listen address"
                         );
                     }
 
                     PeerRegistrationOutcome::ListenAddressConflict => {
                         println!(
-                            "❌ Peer kaydı reddedildi: listen address farklı node kimliğiyle kayıtlı"
+                            "Peer registration rejected: listen address is already registered with a different node identity"
                         );
                     }
 
                     PeerRegistrationOutcome::PeerLimitReached => {
-                        println!(
-                            "❌ Peer kaydı reddedildi: peer limiti dolu"
-                        );
+                        println!("Peer registration rejected: peer limit reached");
                     }
 
                     PeerRegistrationOutcome::InvalidIdentity => {
                         println!(
-                            "❌ Peer kaydı reddedildi: peer kimliği veya listen address geçersiz"
+                            "Peer registration rejected: peer identity or listen address is invalid"
                         );
                     }
                 }
-
             }
 
             NetworkMessage::HandshakeAck {
@@ -998,21 +680,13 @@ impl Network {
                 ..
             } => {
                 println!(
-                    "📥 Handshake ACK alındı. Node: {} Network: {} Protocol: {} Kabul: {}",
-                    node_id,
-                    network_id,
-                    protocol_version,
-                    accepted
+                    "Handshake ACK received. Node: {} Network: {} Protocol: {} Accepted: {}",
+                    node_id, network_id, protocol_version, accepted
                 );
             }
 
-            NetworkMessage::Transaction(
-                transaction,
-            ) => {
-                println!(
-                    "📥 Yeni transaction alındı: {} KBN",
-                    transaction.amount
-                );
+            NetworkMessage::Transaction(transaction) => {
+                println!("New transaction received: {} KBN", transaction.amount);
             }
 
             NetworkMessage::TransactionAck {
@@ -1021,34 +695,21 @@ impl Network {
                 ..
             } => {
                 println!(
-                    "📥 Transaction ACK alındı. Transaction: {} Kabul: {}",
-                    transaction_id,
-                    accepted
+                    "Transaction ACK received. Transaction: {} Accepted: {}",
+                    transaction_id, accepted
                 );
             }
 
-            NetworkMessage::Block(
-                block,
-            ) => {
-                println!(
-                    "📥 Yeni block alındı. Index: {}",
-                    block.index
-                );
+            NetworkMessage::Block(block) => {
+                println!("New block received. Index: {}", block.index);
             }
 
             NetworkMessage::SyncRequest => {
-                println!(
-                    "📥 Blockchain senkronizasyon isteği geldi."
-                );
+                println!("Blockchain synchronization request received.");
             }
 
-            NetworkMessage::ChainChunkRequest {
-                start_index,
-            } => {
-                println!(
-                    "📥 Chain chunk isteği geldi. Başlangıç index: {}",
-                    start_index
-                );
+            NetworkMessage::ChainChunkRequest { start_index } => {
+                println!("Chain chunk request received. Start index: {}", start_index);
             }
 
             NetworkMessage::ChainChunkResponse {
@@ -1057,7 +718,7 @@ impl Network {
                 blocks,
             } => {
                 println!(
-                    "📥 Chain chunk cevabı geldi. Start: {}, chunk: {}, total: {}",
+                    "Chain chunk response received. Start: {}, chunk: {}, total: {}",
                     start_index,
                     blocks.len(),
                     total_blocks
@@ -1065,22 +726,14 @@ impl Network {
             }
         }
 
-        self.push_message_history(
-            message,
-        );
+        self.push_message_history(message);
     }
 
-    pub fn fetch_messages(
-        &mut self,
-    ) -> Vec<NetworkMessage> {
-        std::mem::take(
-            &mut self.inbox,
-        )
+    pub fn fetch_messages(&mut self) -> Vec<NetworkMessage> {
+        std::mem::take(&mut self.inbox)
     }
 
-    pub fn message_count(
-        &self,
-    ) -> usize {
+    pub fn message_count(&self) -> usize {
         self.messages.len()
     }
 }
