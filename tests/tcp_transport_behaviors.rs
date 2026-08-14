@@ -3,6 +3,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use kybernetes::network::tcp::TcpTransport;
 use kybernetes::network::{
+    Network,
     NetworkMessage,
     ONE_SHOT_CLIENT_LISTEN_ADDRESS,
 };
@@ -162,4 +163,83 @@ async fn authenticated_client_message_advertises_the_one_shot_address() {
         } if listen_address == ONE_SHOT_CLIENT_LISTEN_ADDRESS
     ));
     assert!(matches!(message, NetworkMessage::SyncRequest));
+}
+
+#[tokio::test]
+async fn authenticated_request_receives_transaction_ack_on_the_same_connection() {
+    let listener = TcpTransport::bind("127.0.0.1:0")
+        .await
+        .expect("test listener must bind");
+    let address = listener
+        .local_addr()
+        .expect("test listener must have an address");
+    let transaction_id = "ab".repeat(32);
+    let expected_transaction_id = transaction_id.clone();
+
+    let server = tokio::spawn(async move {
+        let server_wallet = Wallet::new();
+        let (mut stream, _, handshake) =
+            TcpTransport::accept_authenticated(
+                &listener,
+                &server_wallet,
+            )
+            .await
+            .expect("request client must authenticate");
+
+        let request = TcpTransport::read_message(&mut stream)
+            .await
+            .expect("request must arrive");
+
+        assert!(matches!(request, NetworkMessage::SyncRequest));
+
+        TcpTransport::send_message(
+            &mut stream,
+            &NetworkMessage::TransactionAck {
+                transaction_id,
+                accepted: true,
+                reason: None,
+            },
+        )
+        .await
+        .expect("transaction ACK must be sent");
+
+        handshake
+    });
+
+    let client_wallet = Wallet::new();
+
+    let response = TcpTransport::send_authenticated_request(
+        &address.to_string(),
+        &client_wallet,
+        ONE_SHOT_CLIENT_LISTEN_ADDRESS,
+        &NetworkMessage::SyncRequest,
+    )
+    .await
+    .expect("authenticated request must receive a response");
+
+    let handshake = server
+        .await
+        .expect("test server task must complete");
+
+    assert!(matches!(
+        handshake,
+        NetworkMessage::Handshake {
+            listen_address,
+            ..
+        } if listen_address == ONE_SHOT_CLIENT_LISTEN_ADDRESS
+    ));
+
+    assert!(Network::validate_transaction_ack(
+        &response,
+        &expected_transaction_id,
+    ));
+
+    assert!(matches!(
+        response,
+        NetworkMessage::TransactionAck {
+            transaction_id,
+            accepted: true,
+            reason: None,
+        } if transaction_id == expected_transaction_id
+    ));
 }

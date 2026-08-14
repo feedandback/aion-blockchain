@@ -4,7 +4,11 @@ use crate::bootstrap::canonical_bootstrap;
 use crate::core::Transaction;
 use crate::economy::Economy;
 use crate::network::tcp::TcpTransport;
-use crate::network::NetworkMessage;
+use crate::network::{
+    Network,
+    NetworkMessage,
+    ONE_SHOT_CLIENT_LISTEN_ADDRESS,
+};
 use crate::node::Node;
 use crate::protocol::{is_fixed_hex, ADDRESS_HEX_LENGTH};
 use crate::state::State;
@@ -147,14 +151,46 @@ pub async fn submit_from_active_validator(
         recipient,
         amount_micro_kbn,
     )?;
+    let transaction_id = transaction.id.clone();
     let p2p_identity = Wallet::new();
 
-    TcpTransport::send_authenticated_client_message(
+    let response = TcpTransport::send_authenticated_request(
         peer_address,
         &p2p_identity,
+        ONE_SHOT_CLIENT_LISTEN_ADDRESS,
         &NetworkMessage::Transaction(transaction.clone()),
     )
     .await?;
 
-    Ok(transaction)
+    if !Network::validate_transaction_ack(
+        &response,
+        &transaction_id,
+    ) {
+        return Err(
+            "Peer geçerli ve eşleşen TransactionAck döndürmedi"
+                .into(),
+        );
+    }
+
+    match response {
+        NetworkMessage::TransactionAck {
+            accepted: true,
+            reason: None,
+            ..
+        } => Ok(transaction),
+
+        NetworkMessage::TransactionAck {
+            accepted: false,
+            reason: Some(reason),
+            ..
+        } => Err(format!(
+            "Transaction node tarafından reddedildi: {}",
+            reason
+        )),
+
+        _ => Err(
+            "Peer geçersiz TransactionAck döndürdü"
+                .into(),
+        ),
+    }
 }

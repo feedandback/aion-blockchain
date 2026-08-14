@@ -1,6 +1,7 @@
 pub mod tcp;
 
 pub const ONE_SHOT_CLIENT_LISTEN_ADDRESS: &str = "127.0.0.1:0";
+const MAX_TRANSACTION_ACK_REASON_LENGTH: usize = 512;
 
 use std::time::{
     SystemTime,
@@ -24,6 +25,7 @@ use crate::wallet::Wallet;
 use crate::protocol::{
     is_fixed_hex,
     ADDRESS_HEX_LENGTH,
+    HASH_HEX_LENGTH,
     MAX_NETWORK_INBOX_MESSAGES,
     MAX_NETWORK_MESSAGE_BYTES,
     MAX_HANDSHAKE_AGE_SECONDS,
@@ -66,6 +68,12 @@ pub enum NetworkMessage {
     },
 
     Transaction(Transaction),
+
+    TransactionAck {
+        transaction_id: String,
+        accepted: bool,
+        reason: Option<String>,
+    },
 
     Block(Block),
 
@@ -405,6 +413,31 @@ impl Network {
                 == NETWORK_PROTOCOL_VERSION
     }
 
+    fn transaction_ack_fields_valid(
+        transaction_id: &str,
+        accepted: bool,
+        reason: &Option<String>,
+    ) -> bool {
+        if !is_fixed_hex(
+            transaction_id,
+            HASH_HEX_LENGTH,
+        ) {
+            return false;
+        }
+
+        match (accepted, reason.as_deref()) {
+            (true, None) => true,
+
+            (false, Some(reason)) => {
+                !reason.is_empty()
+                    && reason.len()
+                        <= MAX_TRANSACTION_ACK_REASON_LENGTH
+            }
+
+            _ => false,
+        }
+    }
+
     fn message_within_limits(
         message: &NetworkMessage,
     ) -> bool {
@@ -465,6 +498,18 @@ impl Network {
                     )
             }
 
+            NetworkMessage::TransactionAck {
+                transaction_id,
+                accepted,
+                reason,
+            } => {
+                Self::transaction_ack_fields_valid(
+                    transaction_id,
+                    *accepted,
+                    reason,
+                )
+            }
+
             NetworkMessage::ChainChunkResponse {
                 blocks,
                 ..
@@ -489,6 +534,22 @@ impl Network {
             NetworkMessage::Handshake {
                 ..
             }
+        ) && Self::message_within_limits(
+            message,
+        )
+    }
+
+    pub fn validate_transaction_ack(
+        message: &NetworkMessage,
+        expected_transaction_id: &str,
+    ) -> bool {
+        matches!(
+            message,
+            NetworkMessage::TransactionAck {
+                transaction_id,
+                ..
+            } if transaction_id
+                == expected_transaction_id
         ) && Self::message_within_limits(
             message,
         )
@@ -536,6 +597,18 @@ impl Network {
                 println!(
                     "📡 Network mesajı yayınlandı: Transaction {}",
                     transaction.id
+                );
+            }
+
+            NetworkMessage::TransactionAck {
+                transaction_id,
+                accepted,
+                ..
+            } => {
+                println!(
+                    "📡 Network mesajı yayınlandı: TransactionAck {} accepted={}",
+                    transaction_id,
+                    accepted
                 );
             }
 
@@ -939,6 +1012,18 @@ impl Network {
                 println!(
                     "📥 Yeni transaction alındı: {} KBN",
                     transaction.amount
+                );
+            }
+
+            NetworkMessage::TransactionAck {
+                transaction_id,
+                accepted,
+                ..
+            } => {
+                println!(
+                    "📥 Transaction ACK alındı. Transaction: {} Kabul: {}",
+                    transaction_id,
+                    accepted
                 );
             }
 

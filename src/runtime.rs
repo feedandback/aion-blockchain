@@ -333,6 +333,14 @@ impl NodeRuntime {
         mut stream: TcpStream,
         handshake: NetworkMessage,
     ) -> Result<(), String> {
+        let one_shot_client = matches!(
+            &handshake,
+            NetworkMessage::Handshake {
+                listen_address,
+                ..
+            } if listen_address == ONE_SHOT_CLIENT_LISTEN_ADDRESS
+        );
+
         {
             let mut locked = runtime.lock().await;
             locked.node.receive_message(handshake);
@@ -353,7 +361,10 @@ impl NodeRuntime {
             }
             let outcome = {
                 let mut locked = runtime.lock().await;
-                locked.process_message(message)?
+                locked.process_message(
+                    message,
+                    one_shot_client,
+                )?
             };
             Self::execute_actions(
                 &runtime,
@@ -654,10 +665,22 @@ impl NodeRuntime {
         stream: &mut TcpStream,
         actions: Vec<RuntimeAction>,
     ) -> Result<(), String> {
+        let mut reply_error = None;
+
         for action in actions {
             match action {
                 RuntimeAction::Reply(message) => {
-                    TcpTransport::send_message(stream, &message).await?;
+                    if let Err(error) =
+                        TcpTransport::send_message(
+                            stream,
+                            &message,
+                        )
+                        .await
+                    {
+                        if reply_error.is_none() {
+                            reply_error = Some(error);
+                        }
+                    }
                 }
                 RuntimeAction::Broadcast(message) => {
                     Self::broadcast_message(runtime, p2p_identity, listen_address, &message).await;
@@ -665,7 +688,10 @@ impl NodeRuntime {
             }
         }
 
-        Ok(())
+        match reply_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     async fn broadcast_message(
@@ -683,7 +709,11 @@ impl NodeRuntime {
                 .await;
     }
 
-    fn process_message(&mut self, message: NetworkMessage) -> Result<ProcessOutcome, String> {
+    fn process_message(
+        &mut self,
+        message: NetworkMessage,
+        one_shot_client: bool,
+    ) -> Result<ProcessOutcome, String> {
         let mut outcome = ProcessOutcome {
             actions: Vec::new(),
         };
@@ -701,6 +731,9 @@ impl NodeRuntime {
             }
             NetworkMessage::ChainChunkResponse { .. } => {
                 return Err("Beklenmeyen chain chunk response reddedildi".into());
+            }
+            NetworkMessage::TransactionAck { .. } => {
+                return Err("Beklenmeyen transaction ACK reddedildi".into());
             }
             NetworkMessage::Transaction(transaction) => {
                 let transaction_id = if crate::protocol::is_fixed_hex(
@@ -722,6 +755,19 @@ impl NodeRuntime {
                         println!(
                             "Transaction accepted: {transaction_id}"
                         );
+
+                        if one_shot_client {
+                            outcome.actions.push(
+                                RuntimeAction::Reply(
+                                    NetworkMessage::TransactionAck {
+                                        transaction_id: transaction_id.clone(),
+                                        accepted: true,
+                                        reason: None,
+                                    },
+                                ),
+                            );
+                        }
+
                         outcome.actions.push(
                             RuntimeAction::Broadcast(
                                 NetworkMessage::Transaction(
@@ -737,6 +783,26 @@ impl NodeRuntime {
                         println!(
                             "Transaction rejected: {transaction_id} - {error}"
                         );
+
+                        if one_shot_client
+                            && crate::protocol::is_fixed_hex(
+                                &transaction_id,
+                                crate::protocol::HASH_HEX_LENGTH,
+                            )
+                        {
+                            outcome.actions.push(
+                                RuntimeAction::Reply(
+                                    NetworkMessage::TransactionAck {
+                                        transaction_id,
+                                        accepted: false,
+                                        reason: Some(
+                                            "Transaction rejected by node"
+                                                .to_string(),
+                                        ),
+                                    },
+                                ),
+                            );
+                        }
                     }
                 }
             }

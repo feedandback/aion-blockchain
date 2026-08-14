@@ -504,6 +504,14 @@ impl Node {
                 );
             }
 
+            message @ NetworkMessage::TransactionAck {
+                ..
+            } => {
+                self.network.receive(
+                    message,
+                );
+            }
+
             NetworkMessage::Transaction(
                 transaction,
             ) => {

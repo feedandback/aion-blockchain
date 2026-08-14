@@ -272,3 +272,88 @@ fn network_rejects_a_tampered_handshake_signature() {
 
     assert_handshake_rejected(message);
 }
+
+#[test]
+fn accepted_transaction_ack_with_matching_id_is_valid() {
+    let transaction_id = "ab".repeat(32);
+    let acknowledgement = NetworkMessage::TransactionAck {
+        transaction_id: transaction_id.clone(),
+        accepted: true,
+        reason: None,
+    };
+
+    assert!(Network::validate_transaction_ack(
+        &acknowledgement,
+        &transaction_id,
+    ));
+}
+
+#[test]
+fn rejected_transaction_ack_with_reason_is_valid() {
+    let transaction_id = "cd".repeat(32);
+    let acknowledgement = NetworkMessage::TransactionAck {
+        transaction_id: transaction_id.clone(),
+        accepted: false,
+        reason: Some("Transaction rejected by node".to_string()),
+    };
+
+    assert!(Network::validate_transaction_ack(
+        &acknowledgement,
+        &transaction_id,
+    ));
+}
+
+#[test]
+fn transaction_ack_for_a_different_transaction_is_rejected() {
+    let expected_transaction_id = "ef".repeat(32);
+    let different_transaction_id = "12".repeat(32);
+
+    let acknowledgement = NetworkMessage::TransactionAck {
+        transaction_id: different_transaction_id,
+        accepted: true,
+        reason: None,
+    };
+
+    assert!(!Network::validate_transaction_ack(
+        &acknowledgement,
+        &expected_transaction_id,
+    ));
+}
+
+#[test]
+fn malformed_transaction_ack_states_are_rejected() {
+    let transaction_id = "34".repeat(32);
+
+    let accepted_with_reason = NetworkMessage::TransactionAck {
+        transaction_id: transaction_id.clone(),
+        accepted: true,
+        reason: Some("unexpected reason".to_string()),
+    };
+
+    let rejected_without_reason = NetworkMessage::TransactionAck {
+        transaction_id: transaction_id.clone(),
+        accepted: false,
+        reason: None,
+    };
+
+    let rejected_with_oversized_reason = NetworkMessage::TransactionAck {
+        transaction_id: transaction_id.clone(),
+        accepted: false,
+        reason: Some("x".repeat(513)),
+    };
+
+    assert!(!Network::validate_transaction_ack(
+        &accepted_with_reason,
+        &transaction_id,
+    ));
+
+    assert!(!Network::validate_transaction_ack(
+        &rejected_without_reason,
+        &transaction_id,
+    ));
+
+    assert!(!Network::validate_transaction_ack(
+        &rejected_with_oversized_reason,
+        &transaction_id,
+    ));
+}

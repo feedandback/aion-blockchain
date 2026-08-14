@@ -272,7 +272,7 @@ async fn main() {
         .await
         {
             Ok(transaction) => {
-                println!("Transaction transmitted");
+                println!("Transaction accepted by node");
                 println!("Transaction ID: {}", transaction.id);
                 println!("Sender address: {}", transaction.from);
                 println!("Recipient address: {}", transaction.to);
@@ -282,7 +282,7 @@ async fn main() {
                 println!("Target peer: {peer_address}");
             }
             Err(error) => {
-                eprintln!("Transaction gönderilemedi: {error}");
+                eprintln!("Transaction kabul edilmedi: {error}");
                 std::process::exit(1);
             }
         }
