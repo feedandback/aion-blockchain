@@ -1183,3 +1183,175 @@ async fn runtime_retries_unavailable_peer_and_syncs_after_peer_comes_online() {
     let _ = recovering_server.await;
     let _ = source_server.await;
 }
+
+#[tokio::test]
+async fn runtime_fails_over_to_a_healthy_peer_when_another_peer_is_unavailable() {
+    let source_directory = TestDirectory::new("multi-peer-source");
+    let follower_directory = TestDirectory::new("multi-peer-follower");
+    let validator_a = Wallet::new();
+    let validator_b = Wallet::new();
+    let consensus = consensus_with(&[&validator_a, &validator_b]);
+    let canonical = canonical_bootstrap().expect("canonical bootstrap must be valid");
+    let genesis = canonical.blockchain.chain[0].clone();
+
+    let selected_address = consensus
+        .select_validator_from_hash(&genesis.hash)
+        .expect("a test validator must be selected")
+        .address
+        .clone();
+
+    let (producer_wallet, recipient_wallet) =
+        if selected_address == validator_a.address() {
+            (&validator_a, &validator_b)
+        } else {
+            (&validator_b, &validator_a)
+        };
+
+    let producer_address = producer_wallet.address().to_string();
+    let recipient_address = recipient_wallet.address().to_string();
+
+    let build_genesis_node = |data_directory: &Path| {
+        let mut blockchain = Blockchain::new(genesis.clone());
+        blockchain
+            .economy
+            .mint(INITIAL_SUPPLY)
+            .expect("test genesis supply must mint");
+
+        let mut state = State::new();
+        state.create_account(producer_address.clone(), INITIAL_SUPPLY);
+        state.create_account(recipient_address.clone(), 0);
+
+        Node::new_with_data_directory(
+            blockchain,
+            state,
+            consensus.clone(),
+            data_directory.to_path_buf(),
+        )
+    };
+
+    let mut source_node = build_genesis_node(source_directory.path());
+
+    Storage::save_blockchain_to(
+        source_directory.path(),
+        &source_node.blockchain.chain,
+    )
+    .expect("source genesis must be persisted");
+
+    let amount = 1u64;
+    let fee = source_node.blockchain.economy.calculate_fee(amount);
+    let mut transaction = Transaction::new(
+        producer_address.clone(),
+        producer_wallet.public_key_hex(),
+        recipient_address.clone(),
+        amount,
+        fee,
+        0,
+    );
+    transaction.sign(producer_wallet.sign(&transaction.message()));
+    let transaction_id = transaction.id.clone();
+
+    assert!(source_node.add_transaction(transaction));
+
+    let producer_identity = ValidatorIdentity::from_private_key(
+        &producer_wallet.private_key_hex(),
+        &consensus,
+    )
+    .expect("selected source validator must be authorized");
+
+    let mut source_runtime =
+        NodeRuntime::from_node(source_node, Some(producer_identity))
+            .expect("source runtime must initialize");
+
+    let produced = source_runtime
+        .try_produce_block(GENESIS_TIMESTAMP + 1)
+        .expect("selected source validator must produce a block");
+
+    assert_eq!(source_runtime.node().blockchain.height(), 2);
+
+    let follower_node = build_genesis_node(follower_directory.path());
+
+    Storage::save_blockchain_to(
+        follower_directory.path(),
+        &follower_node.blockchain.chain,
+    )
+    .expect("follower genesis must be persisted");
+
+    assert_eq!(follower_node.blockchain.height(), 1);
+
+    let follower_runtime =
+        NodeRuntime::from_node(follower_node, None)
+            .expect("follower observer runtime must initialize");
+
+    let (source_listen_address, follower_listen_address) =
+        two_free_loopback_addresses();
+    let unavailable_peer = free_loopback_address();
+
+    let source_server_address = source_listen_address.clone();
+    let source_server = tokio::spawn(async move {
+        source_runtime
+            .run(RuntimeConfig {
+                listen_address: source_server_address,
+                peers: Vec::new(),
+            })
+            .await
+    });
+
+    wait_for_listener(&source_listen_address).await;
+
+    let follower_server_address = follower_listen_address.clone();
+    let healthy_peer = source_listen_address.clone();
+    let follower_server = tokio::spawn(async move {
+        follower_runtime
+            .run(RuntimeConfig {
+                listen_address: follower_server_address,
+                peers: vec![unavailable_peer, healthy_peer],
+            })
+            .await
+    });
+
+    wait_for_listener(&follower_listen_address).await;
+
+    let synchronized_chain =
+        wait_for_persisted_chain(follower_directory.path(), 2).await;
+
+    assert_eq!(synchronized_chain.len(), 2);
+
+    let synchronized_tip = synchronized_chain
+        .last()
+        .expect("failover synchronized chain must have a tip");
+
+    assert_eq!(synchronized_tip.index, 1);
+    assert_eq!(synchronized_tip.hash, produced.hash);
+    assert_eq!(synchronized_tip.validator, selected_address);
+    assert!(synchronized_tip
+        .transactions
+        .iter()
+        .any(|stored| stored.id == transaction_id));
+
+    let source_chain = Storage::load_blockchain_from(source_directory.path())
+        .expect("source persisted chain must be readable")
+        .expect("source persisted chain must exist");
+
+    assert_eq!(source_chain.len(), synchronized_chain.len());
+    assert_eq!(
+        source_chain
+            .last()
+            .expect("source chain must have a tip")
+            .hash,
+        synchronized_tip.hash
+    );
+
+    let mut replay_node = build_genesis_node(follower_directory.path());
+    replay_node
+        .restore_chain_from_storage(synchronized_chain)
+        .expect("failover synchronized chain must replay");
+
+    assert_eq!(replay_node.blockchain.height(), 2);
+    assert_eq!(replay_node.state.balance_of(&recipient_address), amount);
+    assert_eq!(replay_node.state.nonce_of(&producer_address), 1);
+
+    follower_server.abort();
+    source_server.abort();
+    let _ = follower_server.await;
+    let _ = source_server.await;
+}
