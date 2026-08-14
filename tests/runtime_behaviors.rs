@@ -1,14 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use kybernetes::bootstrap::canonical_bootstrap;
 use kybernetes::chain::Blockchain;
 use kybernetes::consensus::Consensus;
 use kybernetes::core::Transaction;
+use kybernetes::network::tcp::TcpTransport;
+use kybernetes::network::{Network, NetworkMessage, ONE_SHOT_CLIENT_LISTEN_ADDRESS};
 use kybernetes::node::Node;
 use kybernetes::protocol::GENESIS_TIMESTAMP;
-use kybernetes::runtime::{NodeRole, NodeRuntime};
+use kybernetes::runtime::{NodeRole, NodeRuntime, RuntimeConfig};
 use kybernetes::state::State;
 use kybernetes::storage::Storage;
 use kybernetes::validator::{ValidatorIdentity, ValidatorKeystore};
@@ -58,6 +60,30 @@ fn consensus_with(wallets: &[&Wallet]) -> Consensus {
         assert!(consensus.add_validator(wallet.address().to_string(), 1));
     }
     consensus
+}
+
+fn free_loopback_address() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("free loopback port must be allocated");
+    let address = listener
+        .local_addr()
+        .expect("allocated loopback address must be readable");
+    drop(listener);
+    address.to_string()
+}
+
+async fn wait_for_listener(address: &str) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if tokio::net::TcpStream::connect(address).await.is_ok() {
+                return;
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("runtime listener must become reachable");
 }
 
 fn provisioned_identity(
@@ -346,5 +372,229 @@ fn validator_keystores_are_isolated_between_data_directories() {
         keystore_b
             .load_authorized(PASSWORD, &consensus, fingerprint)
             .is_err()
+    );
+}
+
+#[tokio::test]
+async fn runtime_one_shot_transaction_returns_acceptance_ack() {
+    let directory = TestDirectory::new("runtime-transaction-ack");
+    let validator = Wallet::new();
+    let sender = Wallet::new();
+    let recipient = Wallet::new();
+    let consensus = consensus_with(&[&validator]);
+    let canonical = canonical_bootstrap().expect("canonical bootstrap must be valid");
+    let genesis = canonical.blockchain.chain[0].clone();
+
+    let mut blockchain = Blockchain::new(genesis);
+    blockchain
+        .economy
+        .mint(INITIAL_SUPPLY)
+        .expect("test supply must mint");
+
+    let mut state = State::new();
+    state.create_account(sender.address().to_string(), INITIAL_SUPPLY);
+    state.create_account(recipient.address().to_string(), 0);
+    state.create_account(validator.address().to_string(), 0);
+
+    let node = Node::new_with_data_directory(
+        blockchain,
+        state,
+        consensus,
+        directory.path().to_path_buf(),
+    );
+    let fee = node.blockchain.economy.calculate_fee(1);
+    let mut transaction = Transaction::new(
+        sender.address().to_string(),
+        sender.public_key_hex(),
+        recipient.address().to_string(),
+        1,
+        fee,
+        0,
+    );
+    transaction.sign(sender.sign(&transaction.message()));
+
+    let transaction_id = transaction.id.clone();
+    let runtime =
+        NodeRuntime::from_node(node, None).expect("observer runtime must initialize");
+    let listen_address = free_loopback_address();
+    let server_address = listen_address.clone();
+
+    let server = tokio::spawn(async move {
+        runtime
+            .run(RuntimeConfig {
+                listen_address: server_address,
+                peers: Vec::new(),
+            })
+            .await
+    });
+
+    wait_for_listener(&listen_address).await;
+
+    let response = TcpTransport::send_authenticated_request(
+        &listen_address,
+        &sender,
+        ONE_SHOT_CLIENT_LISTEN_ADDRESS,
+        &NetworkMessage::Transaction(transaction),
+    )
+    .await
+    .expect("runtime must return a transaction acknowledgement");
+
+    assert!(Network::validate_transaction_ack(
+        &response,
+        &transaction_id
+    ));
+    match response {
+        NetworkMessage::TransactionAck {
+            transaction_id: acknowledged_id,
+            accepted,
+            reason,
+        } => {
+            assert_eq!(acknowledged_id, transaction_id);
+            assert!(accepted);
+            assert_eq!(reason, None);
+        }
+        _ => panic!("runtime must reply with TransactionAck"),
+    }
+
+    server.abort();
+    let _ = server.await;
+}
+
+#[test]
+fn runtime_rebuilds_state_and_nonce_from_persisted_chain() {
+    let directory = TestDirectory::new("runtime-restart-replay");
+    let validator_a = Wallet::new();
+    let validator_b = Wallet::new();
+    let sender = Wallet::new();
+    let recipient = Wallet::new();
+    let consensus = consensus_with(&[&validator_a, &validator_b]);
+    let canonical = canonical_bootstrap().expect("canonical bootstrap must be valid");
+    let genesis = canonical.blockchain.chain[0].clone();
+
+    let selected_address = consensus
+        .select_validator_from_hash(&genesis.hash)
+        .expect("a test validator must be selected")
+        .address
+        .clone();
+    let selected_key = if selected_address == validator_a.address() {
+        validator_a.private_key_hex()
+    } else {
+        validator_b.private_key_hex()
+    };
+
+    let mut blockchain = Blockchain::new(genesis.clone());
+    blockchain
+        .economy
+        .mint(INITIAL_SUPPLY)
+        .expect("test genesis supply must mint");
+
+    let mut state = State::new();
+    state.create_account(sender.address().to_string(), INITIAL_SUPPLY);
+    state.create_account(recipient.address().to_string(), 0);
+    state.create_account(validator_a.address().to_string(), 0);
+    state.create_account(validator_b.address().to_string(), 0);
+
+    let mut node = Node::new_with_data_directory(
+        blockchain,
+        state,
+        consensus.clone(),
+        directory.path().to_path_buf(),
+    );
+
+    let amount = 1_000_000;
+    let fee = node.blockchain.economy.calculate_fee(amount);
+    let mut transaction = Transaction::new(
+        sender.address().to_string(),
+        sender.public_key_hex(),
+        recipient.address().to_string(),
+        amount,
+        fee,
+        0,
+    );
+    transaction.sign(sender.sign(&transaction.message()));
+    assert!(node.add_transaction(transaction));
+
+    Storage::save_blockchain_to(directory.path(), &node.blockchain.chain)
+        .expect("test genesis must be persisted before block production");
+
+    let identity = ValidatorIdentity::from_private_key(&selected_key, &consensus)
+        .expect("selected validator identity must be authorized");
+    let mut runtime =
+        NodeRuntime::from_node(node, Some(identity)).expect("validator runtime must initialize");
+
+    let produced = runtime
+        .try_produce_block(GENESIS_TIMESTAMP + 1)
+        .expect("selected validator must produce the persisted block");
+
+    let stored_chain = Storage::load_blockchain_from(directory.path())
+        .expect("persisted chain must be readable")
+        .expect("persisted chain must exist");
+    assert_eq!(stored_chain.len(), 2);
+    assert_eq!(
+        stored_chain
+            .last()
+            .expect("persisted chain must contain the produced block")
+            .hash,
+        produced.hash
+    );
+
+    let mut restarted_blockchain = Blockchain::new(genesis);
+    restarted_blockchain
+        .economy
+        .mint(INITIAL_SUPPLY)
+        .expect("restart base supply must mint");
+
+    let mut restarted_state = State::new();
+    restarted_state.create_account(sender.address().to_string(), INITIAL_SUPPLY);
+    restarted_state.create_account(recipient.address().to_string(), 0);
+    restarted_state.create_account(validator_a.address().to_string(), 0);
+    restarted_state.create_account(validator_b.address().to_string(), 0);
+
+    let mut restarted_node = Node::new_with_data_directory(
+        restarted_blockchain,
+        restarted_state,
+        consensus,
+        directory.path().to_path_buf(),
+    );
+    restarted_node
+        .restore_chain_from_storage(stored_chain)
+        .expect("persisted chain must replay after restart");
+
+    assert_eq!(restarted_node.blockchain.height(), 2);
+    assert_eq!(
+        restarted_node
+            .blockchain
+            .chain
+            .last()
+            .expect("replayed chain must have a tip")
+            .hash,
+        produced.hash
+    );
+    assert_eq!(restarted_node.state.balance_of(recipient.address()), amount);
+    assert_eq!(restarted_node.state.nonce_of(sender.address()), 1);
+
+    let second_amount = 1;
+    let second_fee = restarted_node
+        .blockchain
+        .economy
+        .calculate_fee(second_amount);
+    let mut second_transaction = Transaction::new(
+        sender.address().to_string(),
+        sender.public_key_hex(),
+        recipient.address().to_string(),
+        second_amount,
+        second_fee,
+        restarted_node.state.nonce_of(sender.address()),
+    );
+    second_transaction.sign(sender.sign(&second_transaction.message()));
+    assert!(restarted_node.add_transaction(second_transaction));
+
+    let restarted_runtime = NodeRuntime::from_node(restarted_node, None)
+        .expect("replayed node must remain usable as a runtime");
+    assert_eq!(restarted_runtime.role(), NodeRole::Observer);
+    assert_eq!(restarted_runtime.node().blockchain.height(), 2);
+    assert_eq!(
+        restarted_runtime.node().state.nonce_of(sender.address()),
+        1
     );
 }
