@@ -1,0 +1,169 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build and publish Windows release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+
+      - name: Use Rust stable
+        run: rustup default stable
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Run release tests
+        run: cargo test --release --locked
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit dependencies
+        run: cargo audit
+
+      - name: Build release
+        run: cargo build --release --locked
+
+      - name: Package release
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $releaseDir = "release\$tag"
+          $binary = "$releaseDir\kybernetes.exe"
+          $zip = "release\kybernetes-$tag-windows-x86_64.zip"
+
+          New-Item -ItemType Directory -Force $releaseDir | Out-Null
+          Copy-Item "target\release\kybernetes.exe" $binary
+
+          $binaryHash = (Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          "$binaryHash  kybernetes.exe" |
+            Set-Content -Encoding ascii "$releaseDir\SHA256SUMS.txt"
+
+          @(
+            "Kybernetes $tag"
+            "Git commit: $env:GITHUB_SHA"
+            "Binary: kybernetes.exe"
+            "SHA-256: $binaryHash"
+            "Windows CRT: statically linked"
+          ) | Set-Content -Encoding ascii "$releaseDir\RELEASE_INFO.txt"
+
+          Compress-Archive -Path "$releaseDir\*" -DestinationPath $zip -Force
+
+          $zipHash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToUpperInvariant()
+
+          "ZIP_SHA256=$zipHash" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Attest Windows binary
+        uses: actions/attest@v4
+        with:
+          subject-path: release/${{ github.ref_name }}/kybernetes.exe
+
+      - name: Attest release archive
+        uses: actions/attest@v4
+        with:
+          subject-path: release/kybernetes-${{ github.ref_name }}-windows-x86_64.zip
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $zip = "release\kybernetes-$tag-windows-x86_64.zip"
+          $checksum = "release\$tag\SHA256SUMS.txt"
+          $info = "release\$tag\RELEASE_INFO.txt"
+          $notes = "Automated Kybernetes release. Windows x86_64 portable build with statically linked CRT.`n`nZIP SHA-256: $env:ZIP_SHA256"
+
+          $arguments = @(
+            "release"
+            "create"
+            $tag
+            $zip
+            $checksum
+            $info
+            "--repo"
+            $env:GITHUB_REPOSITORY
+            "--title"
+            "Kybernetes $tag"
+            "--notes"
+            $notes
+            "--verify-tag"
+          )
+
+          if ($tag -match "-") {
+            $arguments += "--prerelease"
+            $arguments += "--latest=false"
+          }
+
+          & gh @arguments
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Verify uploaded release archive
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $fileName = "kybernetes-$tag-windows-x86_64.zip"
+          $verifyDir = Join-Path $env:RUNNER_TEMP "kybernetes-release-verify"
+
+          New-Item -ItemType Directory -Force $verifyDir | Out-Null
+
+          gh release download $tag `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern $fileName `
+            --dir $verifyDir
+
+          $downloadHash = (
+            Get-FileHash (Join-Path $verifyDir $fileName) -Algorithm SHA256
+          ).Hash.ToUpperInvariant()
+
+          if ($downloadHash -ne $env:ZIP_SHA256) {
+            throw "Downloaded release archive SHA-256 mismatch"
+          }
+
+      - name: Verify build provenance
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $signerWorkflow = "$env:GITHUB_REPOSITORY/.github/workflows/release.yml"
+
+          gh attestation verify `
+            "release\kybernetes-$tag-windows-x86_64.zip" `
+            --repo $env:GITHUB_REPOSITORY `
+            --signer-workflow $signerWorkflow
+
+          gh attestation verify `
+            "release\$tag\kybernetes.exe" `
+            --repo $env:GITHUB_REPOSITORY `
+            --signer-workflow $signerWorkflow
