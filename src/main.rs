@@ -1,4 +1,4 @@
-﻿mod bootstrap;
+mod bootstrap;
 mod chain;
 mod consensus;
 mod core;
@@ -279,7 +279,7 @@ async fn main() {
     }
     if arguments.get(1).map(String::as_str) == Some("wallet") {
         if arguments.len() != 3 {
-            eprintln!("Usage: kybernetes wallet create | address");
+            eprintln!("Usage: kybernetes wallet create | address | balance | send <peer_address> <recipient_address> <amount_microkbn>");
             std::process::exit(1);
         }
 
@@ -327,7 +327,7 @@ async fn main() {
             }
 
             _ => {
-                eprintln!("Usage: kybernetes wallet create | address");
+                eprintln!("Usage: kybernetes wallet create | address | balance | send <peer_address> <recipient_address> <amount_microkbn>");
                 std::process::exit(1);
             }
         }
@@ -1140,7 +1140,7 @@ async fn main() {
 
     if arguments.get(1).map(String::as_str) != Some("demo") {
         eprintln!(
-            "Usage: kybernetes [node [listen_address] [peer...]] | transaction submit <peer_address> <recipient_address> <amount_microkbn> | validator generate-candidate | validator candidate-address | validator activate-candidate | provision-validator | demo | legacy test CLI mode"
+            "Usage: kybernetes [node [listen_address] [peer...]] | wallet create | wallet address | wallet balance | wallet send <peer_address> <recipient_address> <amount_microkbn> | transaction submit <peer_address> <recipient_address> <amount_microkbn> | validator generate-candidate | validator candidate-address | validator activate-candidate | provision-validator | demo | legacy test CLI mode"
         );
         return;
     }
@@ -2549,8 +2549,3 @@ async fn main() {
         }
     }
 }
-
-
-
-
-

@@ -273,3 +273,121 @@ impl UserWalletKeystore {
             .map_err(|error| format!("User wallet file could not be synchronized: {error}"))
     }
 }
+
+#[cfg(test)]
+mod user_wallet_tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_directory(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be valid")
+            .as_nanos();
+
+        std::env::temp_dir().join(format!(
+            "kybernetes-user-wallet-{name}-{}-{stamp}",
+            std::process::id()
+        ))
+    }
+
+    fn cleanup(path: &Path) {
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn wallet_create_and_load_round_trip() {
+        let directory = test_directory("round-trip");
+        let keystore = UserWalletKeystore::at(&directory);
+        let password = "wallet-test-password-123";
+
+        let created = keystore
+            .create(password)
+            .expect("wallet creation must succeed");
+
+        assert!(keystore.exists());
+
+        let loaded = keystore
+            .load(password)
+            .expect("wallet load must succeed")
+            .expect("wallet must exist");
+
+        assert_eq!(created.address(), loaded.address());
+        assert_eq!(created.public_key_hex(), loaded.public_key_hex());
+
+        cleanup(&directory);
+    }
+
+    #[test]
+    fn wrong_password_is_rejected() {
+        let directory = test_directory("wrong-password");
+        let keystore = UserWalletKeystore::at(&directory);
+
+        keystore
+            .create("correct-wallet-password-123")
+            .expect("wallet creation must succeed");
+
+        let result = keystore.load("incorrect-wallet-password-456");
+
+        assert!(result.is_err());
+
+        cleanup(&directory);
+    }
+
+    #[test]
+    fn existing_wallet_is_not_overwritten() {
+        let directory = test_directory("no-overwrite");
+        let keystore = UserWalletKeystore::at(&directory);
+        let password = "wallet-test-password-123";
+
+        let original = keystore
+            .create(password)
+            .expect("first wallet creation must succeed");
+
+        let second = keystore.create(password);
+
+        assert!(second.is_err());
+
+        let loaded = keystore
+            .load(password)
+            .expect("original wallet must remain readable")
+            .expect("original wallet must still exist");
+
+        assert_eq!(original.address(), loaded.address());
+
+        cleanup(&directory);
+    }
+
+    #[test]
+    fn keystore_does_not_store_plaintext_private_key_or_address() {
+        let directory = test_directory("encrypted-file");
+        let keystore = UserWalletKeystore::at(&directory);
+        let password = "wallet-test-password-123";
+
+        let wallet = keystore
+            .create(password)
+            .expect("wallet creation must succeed");
+
+        let contents = fs::read_to_string(keystore.path())
+            .expect("keystore file must be readable");
+
+        assert!(!contents.contains(&wallet.private_key_hex()));
+        assert!(!contents.contains(wallet.address()));
+
+        cleanup(&directory);
+    }
+
+    #[test]
+    fn short_password_is_rejected() {
+        let directory = test_directory("short-password");
+        let keystore = UserWalletKeystore::at(&directory);
+
+        let result = keystore.create("short");
+
+        assert!(result.is_err());
+        assert!(!keystore.exists());
+
+        cleanup(&directory);
+    }
+}
