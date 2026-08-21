@@ -2,7 +2,7 @@
 
 Kybernetes is an experimental independent blockchain implementation written in Rust.
 
-> Current release candidate: **v0.1.0-rc4**
+> Current release candidate: **v0.1.0-rc5**
 
 ## Status
 
@@ -37,7 +37,7 @@ Pre-built Windows x86_64 release candidates are available from the GitHub Releas
 
 Current release candidate:
 
-`v0.1.0-rc4`
+`v0.1.0-rc5`
 
 The Windows package contains:
 
