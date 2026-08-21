@@ -13,11 +13,12 @@ use crate::user_wallet::UserWalletKeystore;
 use crate::validator::ValidatorKeystore;
 use crate::wallet::Wallet;
 
-pub fn prepare_signed_transaction(
+fn prepare_signed_transaction_from_values(
     signer: &Wallet,
     recipient: &str,
     amount_micro_kbn: u64,
-    state: &State,
+    balance: u64,
+    nonce: u64,
     economy: &Economy,
 ) -> Result<Transaction, String> {
     if !is_fixed_hex(recipient, ADDRESS_HEX_LENGTH) {
@@ -32,12 +33,12 @@ pub fn prepare_signed_transaction(
     let total_cost = amount_micro_kbn
         .checked_add(fee)
         .ok_or("Transaction amount plus fee overflow")?;
-    let sender = signer.address();
-    let balance = state.balance_of(sender);
 
     if balance < total_cost {
         return Err("Insufficient balance for transaction".into());
     }
+
+    let sender = signer.address();
 
     let mut transaction = Transaction::new(
         sender.to_string(),
@@ -45,14 +46,16 @@ pub fn prepare_signed_transaction(
         recipient.to_string(),
         amount_micro_kbn,
         fee,
-        state.nonce_of(sender),
+        nonce,
     );
+
     transaction.sign(signer.sign(&transaction.message()));
 
     let signature = transaction
         .signature
         .as_deref()
         .ok_or("Transaction signature could not be created")?;
+
     let derived_address = Wallet::address_from_public_key(&transaction.public_key)
         .ok_or("Transaction public key address could not be derived")?;
 
@@ -64,6 +67,25 @@ pub fn prepare_signed_transaction(
     }
 
     Ok(transaction)
+}
+
+pub fn prepare_signed_transaction(
+    signer: &Wallet,
+    recipient: &str,
+    amount_micro_kbn: u64,
+    state: &State,
+    economy: &Economy,
+) -> Result<Transaction, String> {
+    let sender = signer.address();
+
+    prepare_signed_transaction_from_values(
+        signer,
+        recipient,
+        amount_micro_kbn,
+        state.balance_of(sender),
+        state.nonce_of(sender),
+        economy,
+    )
 }
 
 fn load_replayed_state(data_directory: &Path) -> Result<(State, Economy), String> {
@@ -124,35 +146,41 @@ pub fn prepare_from_active_validator(
     )
 }
 
-pub fn user_wallet_balance(
-    data_directory: &Path,
-    wallet_password: &str,
-) -> Result<(String, u64, u64), String> {
-    let wallet = UserWalletKeystore::at(data_directory)
-        .load(wallet_password)?
-        .ok_or("User wallet keystore was not found")?;
+pub async fn query_account_state_from_node(
+    peer_address: &str,
+    address: &str,
+) -> Result<(String, u64, u64, u64, String), String> {
+    if !is_fixed_hex(address, ADDRESS_HEX_LENGTH) {
+        return Err("Account address must be 64 hex characters".into());
+    }
 
-    let (state, _) = load_replayed_state(data_directory)?;
-    let address = wallet.address().to_string();
+    let p2p_identity = Wallet::new();
 
-    let balance = state.balance_of(&address);
-    let nonce = state.nonce_of(&address);
+    let response = TcpTransport::send_authenticated_request(
+        peer_address,
+        &p2p_identity,
+        ONE_SHOT_CLIENT_LISTEN_ADDRESS,
+        &NetworkMessage::AccountStateRequest {
+            address: address.to_string(),
+        },
+    )
+    .await?;
 
-    Ok((address, balance, nonce))
-}
-pub fn prepare_from_user_wallet(
-    data_directory: &Path,
-    wallet_password: &str,
-    recipient: &str,
-    amount_micro_kbn: u64,
-) -> Result<Transaction, String> {
-    let wallet = UserWalletKeystore::at(data_directory)
-        .load(wallet_password)?
-        .ok_or("User wallet keystore was not found")?;
+    if !Network::validate_account_state_response(&response, address) {
+        return Err("Peer returned an invalid AccountStateResponse".into());
+    }
 
-    let (state, economy) = load_replayed_state(data_directory)?;
+    match response {
+        NetworkMessage::AccountStateResponse {
+            address,
+            balance,
+            nonce,
+            tip_index,
+            tip_hash,
+        } => Ok((address, balance, nonce, tip_index, tip_hash)),
 
-    prepare_signed_transaction(&wallet, recipient, amount_micro_kbn, &state, &economy)
+        _ => Err("Peer returned an unexpected account state response".into()),
+    }
 }
 
 pub async fn submit_from_user_wallet(
@@ -162,8 +190,25 @@ pub async fn submit_from_user_wallet(
     recipient: &str,
     amount_micro_kbn: u64,
 ) -> Result<Transaction, String> {
-    let transaction =
-        prepare_from_user_wallet(data_directory, wallet_password, recipient, amount_micro_kbn)?;
+    let wallet = UserWalletKeystore::at(data_directory)
+        .load(wallet_password)?
+        .ok_or("User wallet keystore was not found")?;
+
+    let sender_address = wallet.address().to_string();
+
+    let (_, balance, nonce, _, _) =
+        query_account_state_from_node(peer_address, &sender_address).await?;
+
+    let bootstrap = canonical_bootstrap()?;
+
+    let transaction = prepare_signed_transaction_from_values(
+        &wallet,
+        recipient,
+        amount_micro_kbn,
+        balance,
+        nonce,
+        &bootstrap.blockchain.economy,
+    )?;
 
     let transaction_id = transaction.id.clone();
     let p2p_identity = Wallet::new();
@@ -196,6 +241,7 @@ pub async fn submit_from_user_wallet(
         _ => Err("Peer returned an invalid TransactionAck".into()),
     }
 }
+
 pub async fn submit_from_active_validator(
     data_directory: &Path,
     validator_password: &str,

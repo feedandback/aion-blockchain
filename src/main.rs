@@ -27,7 +27,7 @@ use crate::runtime::{
 };
 use crate::storage::Storage;
 use crate::transaction_submission::{
-    submit_from_active_validator, submit_from_user_wallet, user_wallet_balance,
+    query_account_state_from_node, submit_from_active_validator, submit_from_user_wallet,
 };
 use crate::user_wallet::UserWalletKeystore;
 use crate::validator::{ValidatorCandidateKeystore, ValidatorKeystore};
@@ -239,10 +239,12 @@ async fn main() {
     if arguments.get(1).map(String::as_str) == Some("wallet")
         && arguments.get(2).map(String::as_str) == Some("balance")
     {
-        if arguments.len() != 3 {
-            eprintln!("Usage: kybernetes wallet balance");
+        if arguments.len() != 4 {
+            eprintln!("Usage: kybernetes wallet balance <peer_address>");
             std::process::exit(1);
         }
+
+        let peer_address = &arguments[3];
 
         let password = match std::env::var(WALLET_PASSWORD_ENV) {
             Ok(password) if !password.trim().is_empty() => password,
@@ -260,15 +262,31 @@ async fn main() {
             }
         };
 
-        match user_wallet_balance(&data_directory, &password) {
-            Ok((address, balance, nonce)) => {
+        let wallet = match UserWalletKeystore::at(&data_directory).load(&password) {
+            Ok(Some(wallet)) => wallet,
+            Ok(None) => {
+                eprintln!("User wallet keystore was not found");
+                std::process::exit(1);
+            }
+            Err(error) => {
+                eprintln!("User wallet could not be opened: {error}");
+                std::process::exit(1);
+            }
+        };
+
+        let address = wallet.address().to_string();
+
+        match query_account_state_from_node(peer_address, &address).await {
+            Ok((address, balance, nonce, tip_index, tip_hash)) => {
                 println!("Address: {}", address);
                 println!("Balance (microKBN): {}", balance);
                 println!("Nonce: {}", nonce);
+                println!("Node tip index: {}", tip_index);
+                println!("Node tip hash: {}", tip_hash);
             }
 
             Err(error) => {
-                eprintln!("User wallet balance could not be read: {error}");
+                eprintln!("User wallet balance could not be queried from node: {error}");
                 std::process::exit(1);
             }
         }
@@ -278,7 +296,7 @@ async fn main() {
     if arguments.get(1).map(String::as_str) == Some("wallet") {
         if arguments.len() != 3 {
             eprintln!(
-                "Usage: kybernetes wallet create | address | balance | send <peer_address> <recipient_address> <amount_microkbn>"
+                "Usage: kybernetes wallet create | address | balance <peer_address> | send <peer_address> <recipient_address> <amount_microkbn>"
             );
             std::process::exit(1);
         }
@@ -324,7 +342,7 @@ async fn main() {
 
             _ => {
                 eprintln!(
-                    "Usage: kybernetes wallet create | address | balance | send <peer_address> <recipient_address> <amount_microkbn>"
+                    "Usage: kybernetes wallet create | address | balance <peer_address> | send <peer_address> <recipient_address> <amount_microkbn>"
                 );
                 std::process::exit(1);
             }
@@ -1138,7 +1156,7 @@ async fn main() {
 
     if arguments.get(1).map(String::as_str) != Some("demo") {
         eprintln!(
-            "Usage: kybernetes [node [listen_address] [peer...]] | wallet create | wallet address | wallet balance | wallet send <peer_address> <recipient_address> <amount_microkbn> | transaction submit <peer_address> <recipient_address> <amount_microkbn> | validator generate-candidate | validator candidate-address | validator activate-candidate | provision-validator | demo | legacy test CLI mode"
+            "Usage: kybernetes [node [listen_address] [peer...]] | wallet create | wallet address | wallet balance <peer_address> | wallet send <peer_address> <recipient_address> <amount_microkbn> | transaction submit <peer_address> <recipient_address> <amount_microkbn> | validator generate-candidate | validator candidate-address | validator activate-candidate | provision-validator | demo | legacy test CLI mode"
         );
         return;
     }
