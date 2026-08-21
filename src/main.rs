@@ -26,7 +26,7 @@ use crate::runtime::{
     NODE_LISTEN_ADDRESS_ENV, NODE_PEERS_ENV, NodeRuntime, RuntimeConfig, VALIDATOR_PASSWORD_ENV,
 };
 use crate::storage::Storage;
-use crate::transaction_submission::submit_from_active_validator;
+use crate::transaction_submission::{submit_from_active_validator, submit_from_user_wallet};
 use crate::validator::{ValidatorCandidateKeystore, ValidatorKeystore};
 use crate::user_wallet::UserWalletKeystore;
 use crate::wallet::Wallet;
@@ -176,6 +176,66 @@ async fn main() {
         return;
     }
 
+    if arguments.get(1).map(String::as_str) == Some("wallet")
+        && arguments.get(2).map(String::as_str) == Some("send")
+    {
+        if arguments.len() != 6 {
+            eprintln!(
+                "Usage: kybernetes wallet send <peer_address> <recipient_address> <amount_microkbn>"
+            );
+            std::process::exit(1);
+        }
+
+        let password = match std::env::var(WALLET_PASSWORD_ENV) {
+            Ok(password) if !password.trim().is_empty() => password,
+            _ => {
+                eprintln!("KYBERNETES_WALLET_PASSWORD environment variable must be defined");
+                std::process::exit(1);
+            }
+        };
+
+        let data_directory = match std::env::var(DATA_DIRECTORY_ENV) {
+            Ok(directory) if !directory.trim().is_empty() => {
+                std::path::PathBuf::from(directory)
+            }
+            _ => {
+                eprintln!("KYBERNETES_DATA_DIR environment variable must be defined");
+                std::process::exit(1);
+            }
+        };
+
+        let amount_micro_kbn = match arguments[5].parse::<u64>() {
+            Ok(amount) => amount,
+            Err(_) => {
+                eprintln!("Amount must be a valid unsigned integer in microKBN");
+                std::process::exit(1);
+            }
+        };
+
+        match submit_from_user_wallet(
+            &data_directory,
+            &password,
+            &arguments[3],
+            &arguments[4],
+            amount_micro_kbn,
+        )
+        .await
+        {
+            Ok(transaction) => {
+                println!("User wallet transaction accepted");
+                println!("Transaction ID: {}", transaction.id);
+                println!("From: {}", transaction.from);
+                println!("To: {}", transaction.to);
+            }
+
+            Err(error) => {
+                eprintln!("User wallet transaction failed: {error}");
+                std::process::exit(1);
+            }
+        }
+
+        return;
+    }
     if arguments.get(1).map(String::as_str) == Some("wallet") {
         if arguments.len() != 3 {
             eprintln!("Usage: kybernetes wallet create | address");
@@ -2448,6 +2508,7 @@ async fn main() {
         }
     }
 }
+
 
 
 
