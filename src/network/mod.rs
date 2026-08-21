@@ -365,6 +365,16 @@ impl Network {
                 reason,
             } => Self::transaction_ack_fields_valid(transaction_id, *accepted, reason),
 
+            NetworkMessage::AccountStateRequest { address } => {
+                is_fixed_hex(address, ADDRESS_HEX_LENGTH)
+            }
+
+            NetworkMessage::AccountStateResponse {
+                address, tip_hash, ..
+            } => {
+                is_fixed_hex(address, ADDRESS_HEX_LENGTH) && is_fixed_hex(tip_hash, HASH_HEX_LENGTH)
+            }
+
             NetworkMessage::ChainChunkResponse { blocks, .. } => {
                 blocks.len() <= MAX_SYNC_BLOCKS_PER_MESSAGE
             }
@@ -793,5 +803,77 @@ impl Network {
 
     pub fn message_count(&self) -> usize {
         self.messages.len()
+    }
+}
+
+#[cfg(test)]
+mod account_state_network_tests {
+    use super::*;
+
+    fn address() -> String {
+        "11".repeat(32)
+    }
+
+    fn tip_hash() -> String {
+        "22".repeat(32)
+    }
+
+    #[test]
+    fn valid_account_state_response_is_accepted() {
+        let address = address();
+
+        let response = NetworkMessage::AccountStateResponse {
+            address: address.clone(),
+            balance: 123_456,
+            nonce: 7,
+            tip_index: 42,
+            tip_hash: tip_hash(),
+        };
+
+        assert!(Network::validate_account_state_response(
+            &response, &address
+        ));
+    }
+
+    #[test]
+    fn account_state_response_for_different_address_is_rejected() {
+        let expected_address = address();
+
+        let response = NetworkMessage::AccountStateResponse {
+            address: "33".repeat(32),
+            balance: 123_456,
+            nonce: 7,
+            tip_index: 42,
+            tip_hash: tip_hash(),
+        };
+
+        assert!(!Network::validate_account_state_response(
+            &response,
+            &expected_address
+        ));
+    }
+
+    #[test]
+    fn malformed_account_state_messages_are_rejected() {
+        let invalid_request = NetworkMessage::AccountStateRequest {
+            address: "invalid".to_string(),
+        };
+
+        assert!(!Network::message_within_limits(&invalid_request));
+
+        let address = address();
+
+        let invalid_response = NetworkMessage::AccountStateResponse {
+            address: address.clone(),
+            balance: 0,
+            nonce: 0,
+            tip_index: 0,
+            tip_hash: "invalid".to_string(),
+        };
+
+        assert!(!Network::validate_account_state_response(
+            &invalid_response,
+            &address
+        ));
     }
 }
