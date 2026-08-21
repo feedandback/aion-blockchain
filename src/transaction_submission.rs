@@ -1,4 +1,4 @@
-﻿use std::path::{Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::bootstrap::canonical_bootstrap;
 use crate::core::Transaction;
@@ -9,8 +9,8 @@ use crate::node::Node;
 use crate::protocol::{ADDRESS_HEX_LENGTH, is_fixed_hex};
 use crate::state::State;
 use crate::storage::Storage;
-use crate::validator::ValidatorKeystore;
 use crate::user_wallet::UserWalletKeystore;
+use crate::validator::ValidatorKeystore;
 use crate::wallet::Wallet;
 
 pub fn prepare_signed_transaction(
@@ -152,13 +152,7 @@ pub fn prepare_from_user_wallet(
 
     let (state, economy) = load_replayed_state(data_directory)?;
 
-    prepare_signed_transaction(
-        &wallet,
-        recipient,
-        amount_micro_kbn,
-        &state,
-        &economy,
-    )
+    prepare_signed_transaction(&wallet, recipient, amount_micro_kbn, &state, &economy)
 }
 
 pub async fn submit_from_user_wallet(
@@ -168,12 +162,8 @@ pub async fn submit_from_user_wallet(
     recipient: &str,
     amount_micro_kbn: u64,
 ) -> Result<Transaction, String> {
-    let transaction = prepare_from_user_wallet(
-        data_directory,
-        wallet_password,
-        recipient,
-        amount_micro_kbn,
-    )?;
+    let transaction =
+        prepare_from_user_wallet(data_directory, wallet_password, recipient, amount_micro_kbn)?;
 
     let transaction_id = transaction.id.clone();
     let p2p_identity = Wallet::new();
@@ -250,5 +240,3 @@ pub async fn submit_from_active_validator(
         _ => Err("Peer returned an invalid TransactionAck".into()),
     }
 }
-
-
