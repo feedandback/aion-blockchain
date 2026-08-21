@@ -124,6 +124,22 @@ pub fn prepare_from_active_validator(
     )
 }
 
+pub fn user_wallet_balance(
+    data_directory: &Path,
+    wallet_password: &str,
+) -> Result<(String, u64, u64), String> {
+    let wallet = UserWalletKeystore::at(data_directory)
+        .load(wallet_password)?
+        .ok_or("User wallet keystore was not found")?;
+
+    let (state, _) = load_replayed_state(data_directory)?;
+    let address = wallet.address().to_string();
+
+    let balance = state.balance_of(&address);
+    let nonce = state.nonce_of(&address);
+
+    Ok((address, balance, nonce))
+}
 pub fn prepare_from_user_wallet(
     data_directory: &Path,
     wallet_password: &str,
@@ -234,4 +250,5 @@ pub async fn submit_from_active_validator(
         _ => Err("Peer returned an invalid TransactionAck".into()),
     }
 }
+
 

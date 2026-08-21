@@ -26,7 +26,7 @@ use crate::runtime::{
     NODE_LISTEN_ADDRESS_ENV, NODE_PEERS_ENV, NodeRuntime, RuntimeConfig, VALIDATOR_PASSWORD_ENV,
 };
 use crate::storage::Storage;
-use crate::transaction_submission::{submit_from_active_validator, submit_from_user_wallet};
+use crate::transaction_submission::{submit_from_active_validator, submit_from_user_wallet, user_wallet_balance};
 use crate::validator::{ValidatorCandidateKeystore, ValidatorKeystore};
 use crate::user_wallet::UserWalletKeystore;
 use crate::wallet::Wallet;
@@ -230,6 +230,47 @@ async fn main() {
 
             Err(error) => {
                 eprintln!("User wallet transaction failed: {error}");
+                std::process::exit(1);
+            }
+        }
+
+        return;
+    }
+    if arguments.get(1).map(String::as_str) == Some("wallet")
+        && arguments.get(2).map(String::as_str) == Some("balance")
+    {
+        if arguments.len() != 3 {
+            eprintln!("Usage: kybernetes wallet balance");
+            std::process::exit(1);
+        }
+
+        let password = match std::env::var(WALLET_PASSWORD_ENV) {
+            Ok(password) if !password.trim().is_empty() => password,
+            _ => {
+                eprintln!("KYBERNETES_WALLET_PASSWORD environment variable must be defined");
+                std::process::exit(1);
+            }
+        };
+
+        let data_directory = match std::env::var(DATA_DIRECTORY_ENV) {
+            Ok(directory) if !directory.trim().is_empty() => {
+                std::path::PathBuf::from(directory)
+            }
+            _ => {
+                eprintln!("KYBERNETES_DATA_DIR environment variable must be defined");
+                std::process::exit(1);
+            }
+        };
+
+        match user_wallet_balance(&data_directory, &password) {
+            Ok((address, balance, nonce)) => {
+                println!("Address: {}", address);
+                println!("Balance (microKBN): {}", balance);
+                println!("Nonce: {}", nonce);
+            }
+
+            Err(error) => {
+                eprintln!("User wallet balance could not be read: {error}");
                 std::process::exit(1);
             }
         }
@@ -2508,6 +2549,7 @@ async fn main() {
         }
     }
 }
+
 
 
 
