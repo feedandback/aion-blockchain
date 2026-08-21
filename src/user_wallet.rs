@@ -8,6 +8,8 @@ use chacha20poly1305::{
     aead::{Aead, Generate, Key, Payload},
 };
 
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+
 use crate::wallet::Wallet;
 
 pub const USER_WALLET_FILE_NAME: &str = "user-wallet.json";
@@ -19,7 +21,7 @@ const ARGON2_MEMORY_KIB: u32 = 19_456;
 const ARGON2_ITERATIONS: u32 = 2;
 const ARGON2_PARALLELISM: u32 = 1;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, ZeroizeOnDrop)]
 struct StoredUserWallet {
     format: String,
     address: String,
@@ -74,10 +76,12 @@ impl UserWalletKeystore {
             private_key_hex: wallet.private_key_hex(),
         };
 
-        let plaintext = serde_json::to_vec(&stored)
+        let mut plaintext = serde_json::to_vec(&stored)
             .map_err(|error| format!("User wallet data could not be serialized: {error}"))?;
 
-        let encrypted = Self::encrypt(password, &plaintext)?;
+        let encrypted_result = Self::encrypt(password, &plaintext);
+        plaintext.zeroize();
+        let encrypted = encrypted_result?;
 
         self.write_new(&encrypted)?;
 
@@ -94,10 +98,12 @@ impl UserWalletKeystore {
         let encrypted = fs::read(&path)
             .map_err(|error| format!("User wallet file could not be read: {error}"))?;
 
-        let plaintext = Self::decrypt(password, &encrypted)?;
+        let mut plaintext = Self::decrypt(password, &encrypted)?;
 
-        let stored: StoredUserWallet = serde_json::from_slice(&plaintext)
-            .map_err(|_| "User wallet data format is invalid".to_string())?;
+        let stored_result = serde_json::from_slice::<StoredUserWallet>(&plaintext);
+        plaintext.zeroize();
+
+        let stored = stored_result.map_err(|_| "User wallet data format is invalid".to_string())?;
 
         if stored.format != USER_WALLET_FORMAT {
             return Err("User wallet format is not supported".into());
@@ -112,12 +118,12 @@ impl UserWalletKeystore {
         Ok(Some(wallet))
     }
 
-    fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], String> {
+    fn derive_key(password: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, String> {
         if password.len() < 12 {
             return Err("User wallet password must be at least 12 characters".into());
         }
 
-        let mut key = [0u8; 32];
+        let mut key = Zeroizing::new([0u8; 32]);
 
         let params = Params::new(
             ARGON2_MEMORY_KIB,
@@ -128,7 +134,7 @@ impl UserWalletKeystore {
         .map_err(|error| format!("User wallet KDF parameters are invalid: {error}"))?;
 
         Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
-            .hash_password_into(password.as_bytes(), salt, &mut key)
+            .hash_password_into(password.as_bytes(), salt, &mut key[..])
             .map_err(|error| format!("User wallet encryption key could not be derived: {error}"))?;
 
         Ok(key)
@@ -142,7 +148,7 @@ impl UserWalletKeystore {
 
         let key = Self::derive_key(password, &salt)?;
 
-        let cipher = ChaCha20Poly1305::new_from_slice(&key)
+        let cipher = ChaCha20Poly1305::new_from_slice(&key[..])
             .map_err(|_| "User wallet encryption key is invalid".to_string())?;
 
         let nonce = Nonce::generate();
@@ -206,7 +212,7 @@ impl UserWalletKeystore {
 
         let key = Self::derive_key(password, &salt)?;
 
-        let cipher = ChaCha20Poly1305::new_from_slice(&key)
+        let cipher = ChaCha20Poly1305::new_from_slice(&key[..])
             .map_err(|_| "User wallet decryption key is invalid".to_string())?;
 
         let nonce = Nonce::from(nonce_array);
