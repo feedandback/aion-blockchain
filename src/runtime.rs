@@ -905,3 +905,125 @@ impl NodeRuntime {
             .map(Some)
     }
 }
+
+#[cfg(test)]
+mod account_state_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_data_directory(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time must be after Unix epoch")
+            .as_nanos();
+
+        std::env::temp_dir().join(format!(
+            "kybernetes-runtime-{name}-{}-{unique}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn account_state_request_returns_current_state_and_tip() {
+        let data_directory = test_data_directory("account-state");
+        let mut runtime =
+            NodeRuntime::initialize_at(&data_directory, None).expect("runtime must initialize");
+
+        let wallet = Wallet::new();
+        let address = wallet.address().to_string();
+
+        let tip = runtime
+            .node
+            .blockchain
+            .chain
+            .last()
+            .expect("runtime chain must contain genesis")
+            .clone();
+
+        let outcome = runtime
+            .process_message(
+                NetworkMessage::AccountStateRequest {
+                    address: address.clone(),
+                },
+                true,
+            )
+            .expect("account state request must succeed");
+
+        assert_eq!(outcome.actions.len(), 1);
+
+        match &outcome.actions[0] {
+            RuntimeAction::Reply(NetworkMessage::AccountStateResponse {
+                address: response_address,
+                balance,
+                nonce,
+                tip_index,
+                tip_hash,
+            }) => {
+                assert_eq!(response_address, &address);
+                assert_eq!(*balance, 0);
+                assert_eq!(*nonce, 0);
+                assert_eq!(*tip_index, tip.index);
+                assert_eq!(tip_hash, &tip.hash);
+            }
+
+            _ => panic!("expected AccountStateResponse reply"),
+        }
+
+        let _ = std::fs::remove_dir_all(data_directory);
+    }
+
+    #[test]
+    fn account_state_request_rejects_invalid_address() {
+        let data_directory = test_data_directory("invalid-account-state");
+        let mut runtime =
+            NodeRuntime::initialize_at(&data_directory, None).expect("runtime must initialize");
+
+        let error = match runtime.process_message(
+            NetworkMessage::AccountStateRequest {
+                address: "not-a-valid-address".to_string(),
+            },
+            true,
+        ) {
+            Ok(_) => panic!("invalid account address must be rejected"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error, "Account state request address is invalid");
+
+        let _ = std::fs::remove_dir_all(data_directory);
+    }
+
+    #[test]
+    fn unsolicited_account_state_response_is_rejected() {
+        let data_directory = test_data_directory("unexpected-account-state-response");
+        let mut runtime =
+            NodeRuntime::initialize_at(&data_directory, None).expect("runtime must initialize");
+
+        let address = Wallet::new().address().to_string();
+        let tip = runtime
+            .node
+            .blockchain
+            .chain
+            .last()
+            .expect("runtime chain must contain genesis")
+            .clone();
+
+        let error = match runtime.process_message(
+            NetworkMessage::AccountStateResponse {
+                address,
+                balance: 0,
+                nonce: 0,
+                tip_index: tip.index,
+                tip_hash: tip.hash,
+            },
+            true,
+        ) {
+            Ok(_) => panic!("unsolicited account state response must be rejected"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error, "Unexpected account state response rejected");
+
+        let _ = std::fs::remove_dir_all(data_directory);
+    }
+}
