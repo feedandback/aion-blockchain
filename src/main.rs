@@ -1,4 +1,4 @@
-mod bootstrap;
+﻿mod bootstrap;
 mod chain;
 mod consensus;
 mod core;
@@ -12,6 +12,7 @@ mod storage;
 mod transaction_submission;
 mod validator;
 mod wallet;
+mod user_wallet;
 
 use std::io::{IsTerminal, Read};
 
@@ -27,6 +28,7 @@ use crate::runtime::{
 use crate::storage::Storage;
 use crate::transaction_submission::submit_from_active_validator;
 use crate::validator::{ValidatorCandidateKeystore, ValidatorKeystore};
+use crate::user_wallet::UserWalletKeystore;
 use crate::wallet::Wallet;
 
 const WALLET_PASSWORD_ENV: &str = "KYBERNETES_WALLET_PASSWORD";
@@ -174,6 +176,63 @@ async fn main() {
         return;
     }
 
+    if arguments.get(1).map(String::as_str) == Some("wallet") {
+        if arguments.len() != 3 {
+            eprintln!("Usage: kybernetes wallet create | address");
+            std::process::exit(1);
+        }
+
+        let password = match std::env::var(WALLET_PASSWORD_ENV) {
+            Ok(password) if !password.trim().is_empty() => password,
+            _ => {
+                eprintln!("KYBERNETES_WALLET_PASSWORD environment variable must be defined");
+                std::process::exit(1);
+            }
+        };
+
+        let keystore = UserWalletKeystore::at(Storage::data_directory());
+
+        match arguments[2].as_str() {
+            "create" => {
+                match keystore.create(&password) {
+                    Ok(wallet) => {
+                        println!("Kybernetes user wallet created");
+                        println!("Address: {}", wallet.address());
+                        println!("Public key: {}", wallet.public_key_hex());
+                        println!("Keystore: {}", keystore.path().display());
+                    }
+                    Err(error) => {
+                        eprintln!("User wallet could not be created: {error}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            "address" => {
+                match keystore.load(&password) {
+                    Ok(Some(wallet)) => {
+                        println!("Address: {}", wallet.address());
+                        println!("Public key: {}", wallet.public_key_hex());
+                    }
+                    Ok(None) => {
+                        eprintln!("User wallet does not exist");
+                        std::process::exit(1);
+                    }
+                    Err(error) => {
+                        eprintln!("User wallet could not be opened: {error}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            _ => {
+                eprintln!("Usage: kybernetes wallet create | address");
+                std::process::exit(1);
+            }
+        }
+
+        return;
+    }
     if arguments.get(1).map(String::as_str) == Some("transaction") {
         if arguments.len() != 6 || arguments.get(2).map(String::as_str) != Some("submit") {
             eprintln!(
@@ -2389,3 +2448,6 @@ async fn main() {
         }
     }
 }
+
+
+
