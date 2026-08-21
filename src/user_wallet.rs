@@ -1,4 +1,4 @@
-﻿use std::fs::{self, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -60,9 +60,7 @@ impl UserWalletKeystore {
 
     pub fn create(&self, password: &str) -> Result<Wallet, String> {
         if self.exists() {
-            return Err(
-                "User wallet already exists; automatic overwrite was rejected".into(),
-            );
+            return Err("User wallet already exists; automatic overwrite was rejected".into());
         }
 
         fs::create_dir_all(&self.data_directory)
@@ -369,8 +367,7 @@ mod user_wallet_tests {
             .create(password)
             .expect("wallet creation must succeed");
 
-        let contents = fs::read_to_string(keystore.path())
-            .expect("keystore file must be readable");
+        let contents = fs::read_to_string(keystore.path()).expect("keystore file must be readable");
 
         assert!(!contents.contains(&wallet.private_key_hex()));
         assert!(!contents.contains(wallet.address()));
