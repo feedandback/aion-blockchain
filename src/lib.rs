@@ -1,4 +1,4 @@
-﻿pub mod bootstrap;
+pub mod bootstrap;
 pub mod chain;
 pub mod consensus;
 pub mod core;
@@ -10,10 +10,9 @@ pub mod runtime;
 pub mod state;
 pub mod storage;
 pub mod transaction_submission;
+mod user_wallet;
 pub mod validator;
 pub mod wallet;
-mod user_wallet;
 
 #[cfg(test)]
 mod tests;
-
