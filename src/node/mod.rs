@@ -328,6 +328,10 @@ impl Node {
                 self.network.receive(message);
             }
 
+            message @ NetworkMessage::AccountStateRequest { .. }
+            | message @ NetworkMessage::AccountStateResponse { .. } => {
+                self.network.receive(message);
+            }
             NetworkMessage::Transaction(transaction) => {
                 match self.insert_transaction_into_mempool(transaction) {
                     Ok(()) => {

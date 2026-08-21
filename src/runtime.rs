@@ -727,6 +727,35 @@ impl NodeRuntime {
                     .actions
                     .push(RuntimeAction::Reply(self.chain_chunk_response(0)?));
             }
+            NetworkMessage::AccountStateRequest { address } => {
+                if !crate::protocol::is_fixed_hex(&address, crate::protocol::ADDRESS_HEX_LENGTH) {
+                    return Err("Account state request address is invalid".into());
+                }
+
+                let balance = self.node.state.balance_of(&address);
+                let nonce = self.node.state.nonce_of(&address);
+
+                let tip = self
+                    .node
+                    .blockchain
+                    .chain
+                    .last()
+                    .ok_or("Blockchain is empty")?;
+
+                outcome
+                    .actions
+                    .push(RuntimeAction::Reply(NetworkMessage::AccountStateResponse {
+                        address,
+                        balance,
+                        nonce,
+                        tip_index: tip.index,
+                        tip_hash: tip.hash.clone(),
+                    }));
+            }
+
+            NetworkMessage::AccountStateResponse { .. } => {
+                return Err("Unexpected account state response rejected".into());
+            }
             NetworkMessage::ChainChunkResponse { .. } => {
                 return Err("Unexpected chain chunk response rejected".into());
             }

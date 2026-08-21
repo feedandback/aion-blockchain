@@ -63,6 +63,18 @@ pub enum NetworkMessage {
         total_blocks: u64,
         blocks: Vec<Block>,
     },
+
+    AccountStateRequest {
+        address: String,
+    },
+
+    AccountStateResponse {
+        address: String,
+        balance: u64,
+        nonce: u64,
+        tip_index: u64,
+        tip_hash: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -381,6 +393,17 @@ impl Network {
         ) && Self::message_within_limits(message)
     }
 
+    pub fn validate_account_state_response(
+        message: &NetworkMessage,
+        expected_address: &str,
+    ) -> bool {
+        matches!(
+            message,
+            NetworkMessage::AccountStateResponse { address, .. }
+                if address == expected_address
+        ) && Self::message_within_limits(message)
+    }
+
     fn print_message_summary(message: &NetworkMessage) {
         match message {
             NetworkMessage::Handshake {
@@ -424,6 +447,25 @@ impl Network {
                 );
             }
 
+            NetworkMessage::AccountStateRequest { address } => {
+                println!(
+                    "Network message broadcast: AccountStateRequest address={}",
+                    address
+                );
+            }
+
+            NetworkMessage::AccountStateResponse {
+                address,
+                balance,
+                nonce,
+                tip_index,
+                ..
+            } => {
+                println!(
+                    "Network message broadcast: AccountStateResponse address={} balance={} nonce={} tip={}",
+                    address, balance, nonce, tip_index
+                );
+            }
             NetworkMessage::Block(block) => {
                 println!("Network message broadcast: Block {}", block.index);
             }
@@ -685,6 +727,22 @@ impl Network {
                 );
             }
 
+            NetworkMessage::AccountStateRequest { address } => {
+                println!("Account state request received. Address: {}", address);
+            }
+
+            NetworkMessage::AccountStateResponse {
+                address,
+                balance,
+                nonce,
+                tip_index,
+                ..
+            } => {
+                println!(
+                    "Account state response received. Address: {} Balance: {} Nonce: {} Tip: {}",
+                    address, balance, nonce, tip_index
+                );
+            }
             NetworkMessage::Transaction(transaction) => {
                 println!("New transaction received: {} KBN", transaction.amount);
             }
