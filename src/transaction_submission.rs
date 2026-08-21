@@ -9,6 +9,7 @@ use crate::node::Node;
 use crate::protocol::{ADDRESS_HEX_LENGTH, is_fixed_hex};
 use crate::state::State;
 use crate::storage::Storage;
+use crate::user_wallet::UserWalletKeystore;
 use crate::validator::ValidatorKeystore;
 use crate::wallet::Wallet;
 
@@ -123,6 +124,78 @@ pub fn prepare_from_active_validator(
     )
 }
 
+pub fn user_wallet_balance(
+    data_directory: &Path,
+    wallet_password: &str,
+) -> Result<(String, u64, u64), String> {
+    let wallet = UserWalletKeystore::at(data_directory)
+        .load(wallet_password)?
+        .ok_or("User wallet keystore was not found")?;
+
+    let (state, _) = load_replayed_state(data_directory)?;
+    let address = wallet.address().to_string();
+
+    let balance = state.balance_of(&address);
+    let nonce = state.nonce_of(&address);
+
+    Ok((address, balance, nonce))
+}
+pub fn prepare_from_user_wallet(
+    data_directory: &Path,
+    wallet_password: &str,
+    recipient: &str,
+    amount_micro_kbn: u64,
+) -> Result<Transaction, String> {
+    let wallet = UserWalletKeystore::at(data_directory)
+        .load(wallet_password)?
+        .ok_or("User wallet keystore was not found")?;
+
+    let (state, economy) = load_replayed_state(data_directory)?;
+
+    prepare_signed_transaction(&wallet, recipient, amount_micro_kbn, &state, &economy)
+}
+
+pub async fn submit_from_user_wallet(
+    data_directory: &Path,
+    wallet_password: &str,
+    peer_address: &str,
+    recipient: &str,
+    amount_micro_kbn: u64,
+) -> Result<Transaction, String> {
+    let transaction =
+        prepare_from_user_wallet(data_directory, wallet_password, recipient, amount_micro_kbn)?;
+
+    let transaction_id = transaction.id.clone();
+    let p2p_identity = Wallet::new();
+
+    let response = TcpTransport::send_authenticated_request(
+        peer_address,
+        &p2p_identity,
+        ONE_SHOT_CLIENT_LISTEN_ADDRESS,
+        &NetworkMessage::Transaction(transaction.clone()),
+    )
+    .await?;
+
+    if !Network::validate_transaction_ack(&response, &transaction_id) {
+        return Err("Peer did not return a valid matching TransactionAck".into());
+    }
+
+    match response {
+        NetworkMessage::TransactionAck {
+            accepted: true,
+            reason: None,
+            ..
+        } => Ok(transaction),
+
+        NetworkMessage::TransactionAck {
+            accepted: false,
+            reason: Some(reason),
+            ..
+        } => Err(format!("Transaction was rejected by the node: {}", reason)),
+
+        _ => Err("Peer returned an invalid TransactionAck".into()),
+    }
+}
 pub async fn submit_from_active_validator(
     data_directory: &Path,
     validator_password: &str,

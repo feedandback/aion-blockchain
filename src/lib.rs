@@ -10,6 +10,7 @@ pub mod runtime;
 pub mod state;
 pub mod storage;
 pub mod transaction_submission;
+pub mod user_wallet;
 pub mod validator;
 pub mod wallet;
 
