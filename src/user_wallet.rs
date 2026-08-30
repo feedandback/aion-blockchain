@@ -1,6 +1,9 @@
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+#[cfg(not(windows))]
+use std::fs::OpenOptions;
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
@@ -67,6 +70,9 @@ impl UserWalletKeystore {
 
         fs::create_dir_all(&self.data_directory)
             .map_err(|error| format!("User wallet directory could not be created: {error}"))?;
+
+        #[cfg(windows)]
+        Self::restrict_windows_directory_acl(&self.data_directory)?;
 
         let wallet = Wallet::new();
 
@@ -229,21 +235,35 @@ impl UserWalletKeystore {
     }
 
     fn write_new(&self, contents: &[u8]) -> Result<(), String> {
-        let final_path = self.path();
+        #[cfg(windows)]
+        let data_directory = fs::canonicalize(&self.data_directory)
+            .map_err(|error| format!("User wallet directory could not be resolved: {error}"))?;
+
+        #[cfg(not(windows))]
+        let data_directory = &self.data_directory;
+
+        let final_path = data_directory.join(USER_WALLET_FILE_NAME);
 
         let random_name = hex::encode(Key::<ChaCha20Poly1305>::generate());
-        let temp_path = self
-            .data_directory
-            .join(format!(".user-wallet-{random_name}.tmp"));
+        let temp_path = data_directory.join(format!(".user-wallet-{random_name}.tmp"));
 
-        let write_result = Self::write_private_file(&temp_path, contents);
+        let temp_file = match Self::write_private_file(&temp_path, contents) {
+            Ok(file) => file,
+            Err(error) => {
+                let _ = fs::remove_file(&temp_path);
+                return Err(error);
+            }
+        };
 
-        if let Err(error) = write_result {
-            let _ = fs::remove_file(&temp_path);
-            return Err(error);
-        }
+        #[cfg(not(windows))]
+        drop(temp_file);
 
-        if let Err(error) = fs::hard_link(&temp_path, &final_path) {
+        let publish_result = fs::hard_link(&temp_path, &final_path);
+
+        #[cfg(windows)]
+        drop(temp_file);
+
+        if let Err(error) = publish_result {
             let _ = fs::remove_file(&temp_path);
 
             return Err(format!(
@@ -256,7 +276,170 @@ impl UserWalletKeystore {
         Ok(())
     }
 
-    fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), String> {
+    #[cfg(windows)]
+    fn create_private_file(path: &Path) -> Result<fs::File, String> {
+        use std::mem::size_of;
+        use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::io::FromRawHandle;
+        use std::ptr::null_mut;
+
+        use windows_sys::Win32::Foundation::{GENERIC_WRITE, INVALID_HANDLE_VALUE, LocalFree};
+        use windows_sys::Win32::Security::Authorization::{
+            ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+        };
+        use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+        use windows_sys::Win32::Storage::FileSystem::{
+            CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL,
+        };
+
+        let mut wide_path: Vec<u16> = path.as_os_str().encode_wide().collect();
+
+        if wide_path.contains(&0) {
+            return Err("User wallet temp file path contains an interior null character".into());
+        }
+
+        wide_path.push(0);
+
+        // Protected DACL:
+        // - OW = current object owner
+        // - SY = Local System
+        // - BA = Built-in Administrators
+        let sddl: Vec<u16> = "D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)\0"
+            .encode_utf16()
+            .collect();
+
+        let mut security_descriptor: PSECURITY_DESCRIPTOR = null_mut();
+
+        let converted = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                SDDL_REVISION_1,
+                &mut security_descriptor,
+                null_mut(),
+            )
+        };
+
+        if converted == 0 {
+            return Err(format!(
+                "User wallet Windows security descriptor could not be created: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+
+        let security_attributes = SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: security_descriptor,
+            bInheritHandle: 0,
+        };
+
+        let handle = unsafe {
+            CreateFileW(
+                wide_path.as_ptr(),
+                GENERIC_WRITE,
+                0, // Keep the temporary file exclusively open while it is initialized.
+                &security_attributes,
+                CREATE_NEW,
+                FILE_ATTRIBUTE_NORMAL,
+                null_mut(),
+            )
+        };
+
+        let create_error = if handle == INVALID_HANDLE_VALUE {
+            Some(std::io::Error::last_os_error())
+        } else {
+            None
+        };
+
+        unsafe {
+            LocalFree(security_descriptor);
+        }
+
+        if let Some(error) = create_error {
+            return Err(format!(
+                "User wallet temp file could not be created securely: {error}"
+            ));
+        }
+
+        Ok(unsafe { fs::File::from_raw_handle(handle) })
+    }
+
+    #[cfg(windows)]
+    fn restrict_windows_directory_acl(path: &Path) -> Result<(), String> {
+        use std::os::windows::ffi::OsStrExt;
+        use std::ptr::null_mut;
+
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::Security::Authorization::{
+            ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+        };
+        use windows_sys::Win32::Security::{
+            DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+            SetFileSecurityW,
+        };
+
+        let resolved = fs::canonicalize(path)
+            .map_err(|error| format!("User wallet directory could not be resolved: {error}"))?;
+
+        let mut wide_path: Vec<u16> = resolved.as_os_str().encode_wide().collect();
+
+        if wide_path.contains(&0) {
+            return Err("User wallet directory path contains an interior null character".into());
+        }
+
+        wide_path.push(0);
+
+        // Protect the Kybernetes data directory from inherited mutation rights.
+        // Full control remains with the object owner, Local System, and Administrators.
+        let sddl: Vec<u16> = "D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)\0"
+            .encode_utf16()
+            .collect();
+
+        let mut security_descriptor: PSECURITY_DESCRIPTOR = null_mut();
+
+        let converted = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                SDDL_REVISION_1,
+                &mut security_descriptor,
+                null_mut(),
+            )
+        };
+
+        if converted == 0 {
+            return Err(format!(
+                "User wallet directory security descriptor could not be created: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+
+        let result = unsafe {
+            SetFileSecurityW(
+                wide_path.as_ptr(),
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                security_descriptor,
+            )
+        };
+
+        let set_error = if result == 0 {
+            Some(std::io::Error::last_os_error())
+        } else {
+            None
+        };
+
+        unsafe {
+            LocalFree(security_descriptor);
+        }
+
+        if let Some(error) = set_error {
+            return Err(format!(
+                "User wallet directory permissions could not be restricted: {error}"
+            ));
+        }
+
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    fn create_private_file(path: &Path) -> Result<fs::File, String> {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
 
@@ -266,15 +449,21 @@ impl UserWalletKeystore {
             options.mode(0o600);
         }
 
-        let mut file = options
+        options
             .open(path)
-            .map_err(|error| format!("User wallet temp file could not be created: {error}"))?;
+            .map_err(|error| format!("User wallet temp file could not be created: {error}"))
+    }
+
+    fn write_private_file(path: &Path, contents: &[u8]) -> Result<fs::File, String> {
+        let mut file = Self::create_private_file(path)?;
 
         file.write_all(contents)
             .map_err(|error| format!("User wallet file could not be written: {error}"))?;
 
         file.sync_all()
-            .map_err(|error| format!("User wallet file could not be synchronized: {error}"))
+            .map_err(|error| format!("User wallet file could not be synchronized: {error}"))?;
+
+        Ok(file)
     }
 }
 
@@ -300,6 +489,218 @@ mod user_wallet_tests {
         let _ = fs::remove_dir_all(path);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn wallet_temp_file_is_locked_until_publication() {
+        let directory = test_directory("locked-until-publication");
+        fs::create_dir_all(&directory).expect("test directory must be created");
+
+        let temp_path = directory.join("wallet.tmp");
+        let renamed_path = directory.join("renamed-wallet.tmp");
+        let final_path = directory.join(USER_WALLET_FILE_NAME);
+
+        let temp_file = UserWalletKeystore::write_private_file(
+            &temp_path,
+            b"encrypted-wallet-regression-test-data",
+        )
+        .expect("protected temp file must be written");
+
+        assert!(
+            fs::remove_file(&temp_path).is_err(),
+            "open wallet temp file must reject deletion"
+        );
+        assert!(
+            fs::rename(&temp_path, &renamed_path).is_err(),
+            "open wallet temp file must reject renaming"
+        );
+
+        fs::hard_link(&temp_path, &final_path)
+            .expect("wallet must be publishable while its temp handle is open");
+
+        drop(temp_file);
+
+        fs::remove_file(&temp_path).expect("temp link must be removable after publication");
+        assert!(final_path.exists());
+
+        cleanup(&directory);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn wallet_keystore_has_protected_dacl() {
+        use std::mem::size_of;
+        use std::os::windows::ffi::OsStrExt;
+        use std::ptr::null_mut;
+
+        use windows_sys::Win32::Security::{
+            DACL_SECURITY_INFORMATION, GetFileSecurityW, GetSecurityDescriptorControl,
+            SE_DACL_PROTECTED,
+        };
+
+        let directory = test_directory("protected-dacl");
+        let keystore = UserWalletKeystore::at(&directory);
+
+        keystore
+            .create("wallet-test-password-123")
+            .expect("wallet creation must succeed");
+
+        let wide_path: Vec<u16> = keystore
+            .path()
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut required_length = 0;
+
+        unsafe {
+            GetFileSecurityW(
+                wide_path.as_ptr(),
+                DACL_SECURITY_INFORMATION,
+                null_mut(),
+                0,
+                &mut required_length,
+            );
+        }
+
+        assert!(
+            required_length > 0,
+            "wallet security descriptor size must be available: {}",
+            std::io::Error::last_os_error()
+        );
+
+        let descriptor_words = required_length.div_ceil(size_of::<u32>() as u32) as usize;
+        let mut security_descriptor = vec![0u32; descriptor_words];
+        let security_result = unsafe {
+            GetFileSecurityW(
+                wide_path.as_ptr(),
+                DACL_SECURITY_INFORMATION,
+                security_descriptor.as_mut_ptr().cast(),
+                required_length,
+                &mut required_length,
+            )
+        };
+
+        assert_ne!(
+            security_result,
+            0,
+            "wallet security descriptor must be readable: {}",
+            std::io::Error::last_os_error()
+        );
+
+        let mut control = 0;
+        let mut revision = 0;
+        let control_result = unsafe {
+            GetSecurityDescriptorControl(
+                security_descriptor.as_mut_ptr().cast(),
+                &mut control,
+                &mut revision,
+            )
+        };
+
+        assert_ne!(
+            control_result,
+            0,
+            "wallet security descriptor control must be readable: {}",
+            std::io::Error::last_os_error()
+        );
+        assert_ne!(
+            control & SE_DACL_PROTECTED,
+            0,
+            "wallet DACL must be protected from inheritance"
+        );
+
+        cleanup(&directory);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn wallet_directory_has_protected_dacl() {
+        use std::mem::size_of;
+        use std::os::windows::ffi::OsStrExt;
+        use std::ptr::null_mut;
+
+        use windows_sys::Win32::Security::{
+            DACL_SECURITY_INFORMATION, GetFileSecurityW, GetSecurityDescriptorControl,
+            SE_DACL_PROTECTED,
+        };
+
+        let directory = test_directory("protected-directory-dacl");
+        let keystore = UserWalletKeystore::at(&directory);
+
+        keystore
+            .create("wallet-test-password-123")
+            .expect("wallet creation must succeed");
+
+        let wide_path: Vec<u16> = directory
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let mut required_length = 0;
+
+        unsafe {
+            GetFileSecurityW(
+                wide_path.as_ptr(),
+                DACL_SECURITY_INFORMATION,
+                null_mut(),
+                0,
+                &mut required_length,
+            );
+        }
+
+        assert!(
+            required_length > 0,
+            "wallet directory security descriptor size must be available: {}",
+            std::io::Error::last_os_error()
+        );
+
+        let descriptor_words = required_length.div_ceil(size_of::<u32>() as u32) as usize;
+        let mut security_descriptor = vec![0u32; descriptor_words];
+
+        let security_result = unsafe {
+            GetFileSecurityW(
+                wide_path.as_ptr(),
+                DACL_SECURITY_INFORMATION,
+                security_descriptor.as_mut_ptr().cast(),
+                required_length,
+                &mut required_length,
+            )
+        };
+
+        assert_ne!(
+            security_result,
+            0,
+            "wallet directory security descriptor must be readable: {}",
+            std::io::Error::last_os_error()
+        );
+
+        let mut control = 0;
+        let mut revision = 0;
+
+        let control_result = unsafe {
+            GetSecurityDescriptorControl(
+                security_descriptor.as_mut_ptr().cast(),
+                &mut control,
+                &mut revision,
+            )
+        };
+
+        assert_ne!(
+            control_result,
+            0,
+            "wallet directory security descriptor control must be readable: {}",
+            std::io::Error::last_os_error()
+        );
+
+        assert_ne!(
+            control & SE_DACL_PROTECTED,
+            0,
+            "wallet data directory DACL must be protected from inheritance"
+        );
+
+        cleanup(&directory);
+    }
     #[test]
     fn wallet_create_and_load_round_trip() {
         let directory = test_directory("round-trip");
