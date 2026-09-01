@@ -256,4 +256,4 @@ The release workflow performs:
 
 ## License
 
-License information will be added before the first stable release.
+Kybernetes is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
