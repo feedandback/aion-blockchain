@@ -2,11 +2,11 @@
 
 Kybernetes is an experimental independent blockchain implementation written in Rust.
 
-> Current release candidate: **v0.1.0-rc6**
+> Current release: **v0.1.0**
 
 ## Status
 
-Kybernetes is currently a release-candidate / experimental network implementation.
+Kybernetes is currently an experimental network implementation.
 
 It is not yet intended for production use with real financial value.
 
@@ -33,11 +33,11 @@ It is not yet intended for production use with real financial value.
 
 ## Download
 
-Pre-built Windows x86_64 release candidates are available from the GitHub Releases page.
+Pre-built Windows x86_64 releases are available from the GitHub Releases page.
 
-Current release candidate:
+Current release:
 
-`v0.1.0-rc6`
+`v0.1.0`
 
 The Windows package contains:
 
@@ -236,11 +236,11 @@ Kybernetes uses cryptographic signatures and encrypted wallet storage, but the p
 
 Before production use, additional security hardening, external security review, operational testing, and network-level validation are required.
 
-Do not use release candidates to store assets of real-world financial value.
+Do not use Kybernetes to store assets of real-world financial value until the project has completed additional security review and production validation.
 
 ## Releases
 
-Release candidates are automatically built and tested with GitHub Actions.
+Kybernetes releases are automatically built and tested with GitHub Actions.
 
 The release workflow performs:
 
